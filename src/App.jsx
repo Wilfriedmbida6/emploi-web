@@ -234,7 +234,6 @@ export default function App() {
   const [voiceOn, setVoiceOn] = useState(false);
   const [newMsg, setNewMsg]     = useState("");
   const [myRatings, setMyRatings] = useState({});
-  const [activeChatContact, setActiveChatContact] = useState(null);
 
   const [highlightJob, setHighlightJob] = useState(null);
   const [onlineFilter, setOnlineFilter] = useState(false);
@@ -290,9 +289,14 @@ export default function App() {
           const p = Array.isArray(profile) ? profile[0] : null;
           setCurrentUser({ ...user, ...(p || {}), token: session.access_token });
           setAuthToken(session.access_token);
-          if (user.email === ADMIN_EMAIL) { setScreen("admin"); setTab("dashboard"); }
           
-          else { setScreen("user"); setTab("home"); }
+          if (user.email === ADMIN_EMAIL) { setScreen("admin"); setTab("dashboard"); }
+          else { 
+            await loadUsers(session.access_token);
+            await loadJobs(session.access_token);
+            setScreen("user"); setTab("home"); 
+          }
+
         } else if (session.refresh_token) {
           // Token expiré → rafraîchir
           const refreshed = await sb.refreshToken(session.refresh_token);
@@ -300,8 +304,6 @@ export default function App() {
             sb.saveSession(refreshed);
             setAuthToken(refreshed.access_token);
             setCurrentUser({ ...refreshed.user, token: refreshed.access_token });
-            await loadUsers(session.access_token);
-            setScreen("user"); setTab("home");
             setScreen("user"); setTab("home");
           } else {
             sb.clearSession(); setScreen("login");
@@ -404,8 +406,11 @@ const loadUsers = async (token) => {
       };
 
       setCurrentUser(user);
+      await loadUsers(d.access_token);
+      await loadJobs(d.access_token);
       setScreen("user"); setTab("home");
       toast$(`Bienvenue ${user.name} ! 🎉`);
+      
     } catch {
       toast$("Erreur réseau. Vérifiez votre connexion.", true);
     }
