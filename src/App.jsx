@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { io } from "socket.io-client";
 
 // ══════════════════════════════════════════════════════════════
 //  ⚠️  CONFIG SUPABASE — 2 endroits à modifier
@@ -222,6 +223,8 @@ export default function App() {
   const [authToken, setAuthToken]     = useState(null); // JWT Supabase
 
   // UI state
+  const [activeChatContact, setActiveChatContact] = useState(null);
+  const socketRef = useRef(null);
   const [tab, _setTab]        = useState("home");
   const [prevTab, setPrevTab_unused] = useState("home");
   const setTab = (newTab) => { setPrevTab_unused(tab); _setTab(newTab); };
@@ -272,6 +275,8 @@ export default function App() {
       const session = sb.getSession();
       if (!session?.access_token) { setScreen("login"); return; }
 
+
+
       // Vérifier si le token est encore valide
       try {
         const r = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
@@ -309,6 +314,23 @@ export default function App() {
     };
     restore();
   }, []);
+  useEffect(() => {
+  if (!currentUser) return;
+  const socket = io(SERVER_URL, {
+    auth: { 
+      userId: currentUser.id, 
+      name: currentUser.name || currentUser.email 
+    }
+  });
+  socketRef.current = socket;
+  socket.on("message", (msg) => {
+    setMsgs(m => [...m, { ...msg, isMe: false }]);
+  });
+  socket.on("user_online", ({ name, online }) => {
+    setUsers(u => u.map(x => x.name === name ? { ...x, online } : x));
+  });
+  return () => socket.disconnect();
+}, [currentUser]);
 
   // ─── OPEN PROFILE ─────────────────────────────────────────────
   const openProfile = (userName) => {
@@ -437,13 +459,27 @@ export default function App() {
     toast$("Déconnecté");
   };
 
-  const sendMsg = (text=null) => {
-    const txt = text || newMsg.trim();
-    if (!txt) return;
-    setMsgs(m => [...m, { id:Date.now(), from:"Moi", text:txt, time:new Date().toLocaleTimeString("fr",{hour:"2-digit",minute:"2-digit"}), isMe:true }]);
-    if (!text) setNewMsg("");
-    setTimeout(() => chatRef.current?.scrollTo(0,9999), 80);
+   const sendMsg = (text = null) => {
+  const txt = text || newMsg.trim();
+  if (!txt) return;
+  
+  const msg = {
+    to: activeChatContact?.name,
+    text: txt,
+    msgId: Date.now()
   };
+  
+  socketRef.current?.emit("message", msg);
+  setMsgs(m => [...m, { 
+    id: Date.now(), 
+    from: "Moi", 
+    text: txt, 
+    time: new Date().toLocaleTimeString("fr", {hour:"2-digit", minute:"2-digit"}), 
+    isMe: true 
+  }]);
+  if (!text) setNewMsg("");
+  setTimeout(() => chatRef.current?.scrollTo(0, 9999), 80);
+};
 
   const openChat = (contactName, online=true) => {
     setActiveChatContact({ name:contactName, initials:contactName.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase(), online });
@@ -1016,6 +1052,7 @@ function AdminDash({ users, jobs, notifs, setAdminNotifs, setTab }) {
     { label:"En ligne",      value:users.filter(u=>u.online).length,              icon:"🟢", color:"#00BCD4", tab:"users" },
     { label:"Non lus",       value:notifs.filter(n=>!n.read).length,             icon:"🔔", color:"#FF9800", tab:"notifs" },
   ];
+
 
   const navFromNotif = (n) => {
     setAdminNotifs?.(nn=>nn.map(x=>x.id===n.id?{...x,read:true}:x));
