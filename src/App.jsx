@@ -291,6 +291,7 @@ export default function App() {
           setCurrentUser({ ...user, ...(p || {}), token: session.access_token });
           setAuthToken(session.access_token);
           if (user.email === ADMIN_EMAIL) { setScreen("admin"); setTab("dashboard"); }
+          
           else { setScreen("user"); setTab("home"); }
         } else if (session.refresh_token) {
           // Token expiré → rafraîchir
@@ -299,6 +300,8 @@ export default function App() {
             sb.saveSession(refreshed);
             setAuthToken(refreshed.access_token);
             setCurrentUser({ ...refreshed.user, token: refreshed.access_token });
+            await loadUsers(session.access_token);
+            setScreen("user"); setTab("home");
             setScreen("user"); setTab("home");
           } else {
             sb.clearSession(); setScreen("login");
@@ -322,6 +325,18 @@ export default function App() {
       name: currentUser.name || currentUser.email 
     }
   });
+
+  // Charger les profils depuis Supabase
+const loadUsers = async (token) => {
+  const data = await sb.select("profiles", "*", token);
+  if (Array.isArray(data) && data.length > 0) {
+    setUsers(data.map(u => ({
+      ...u,
+      avatar: u.name?.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase() || "?",
+    })));
+  }
+};
+
   socketRef.current = socket;
   socket.on("message", (msg) => {
     setMsgs(m => [...m, { ...msg, isMe: false }]);
@@ -331,6 +346,17 @@ export default function App() {
   });
   return () => socket.disconnect();
 }, [currentUser]);
+
+  // Charger les profils depuis Supabase
+const loadUsers = async (token) => {
+  const data = await sb.select("profiles", "*", token);
+  if (Array.isArray(data) && data.length > 0) {
+    setUsers(data.map(u => ({
+      ...u,
+      avatar: u.name?.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase() || "?",
+    })));
+  }
+};
 
   // ─── OPEN PROFILE ─────────────────────────────────────────────
   const openProfile = (userName) => {
