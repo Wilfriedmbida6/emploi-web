@@ -265,6 +265,7 @@ export default function App() {
   const [rSkills, setRSkills] = useState([]);
 
   const unread      = notifs.filter(n => !n.read).length;
+  const unreadMsgs  = Object.values(chatMsgs||{}).flat().filter(m => !m.isMe && !m.read).length;
   const adminUnread = screen==="admin" ? (adminNotifs||[]).filter(n=>!n.read).length : 0;
 
   const toast$ = (msg, err=false) => {
