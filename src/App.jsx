@@ -1346,7 +1346,7 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
     setChatStatus(s => ({ ...s, [msgId]: "sent" }));
 
     const sock = appSocketRef?.current;
-    const doSend = (s) => s.emit("message", { to: contactName, text, msgId });
+    const doSend = (s) => s.emit("message", { to: contactName?.trim(), text, msgId });
 
     if (sock?.connected) {
       doSend(sock);
