@@ -1345,11 +1345,20 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
     setChatStatus(s => ({ ...s, [msgId]: "sent" }));
 
     const sock = appSocketRef?.current;
+    const doSend = (s) => s.emit("message", { to: contactName, text, msgId });
+
     if (sock?.connected) {
-      sock.emit("message", { to: contactName, text, msgId });
+      doSend(sock);
       console.log("📤 Message envoyé à", contactName);
+    } else if (sock) {
+      // ✅ Attendre la connexion puis envoyer
+      console.warn("⏳ Socket pas encore connecté, attente...");
+      sock.once("connect", () => {
+        doSend(sock);
+        console.log("📤 Message envoyé après reconnexion à", contactName);
+      });
     } else {
-      console.warn("⚠️ Socket non connecté", sock);
+      console.warn("⚠️ Pas de socket");
     }
   };
 
@@ -1441,6 +1450,14 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
     const base = name === "Mamadou Diallo" ? msgs.map(m => ({ ...m, status:m.isMe?"read":undefined })) : [];
     return [...base, ...(localMsgs[name]||[])];
   };
+  const markRead = (name) => {
+    setLocalMsgs(prev => {
+      const updated = (prev[name]||[]).map(m => ({ ...m, read: true }));
+      const next = { ...prev, [name]: updated };
+      try { localStorage.setItem('ept_msgs', JSON.stringify(next)); } catch{}
+      return next;
+    });
+  };
 
   // ── LISTE DES CONVERSATIONS ────────────────────────────────
   const realNames = Object.keys(localMsgs).filter(n => n && !DEFAULT_CONTACTS.find(d => d.name === n));
@@ -1490,6 +1507,7 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
   );
 
   // ── FENÊTRE DE CHAT ────────────────────────────────────────
+  useEffect(() => { if (activeC) markRead(activeC.name); }, [activeC?.name]);
   const cMsgs   = getMsgs(activeC.name);
   const bg      = getColor(activeC.name);
   const initials= activeC.initials||activeC.name.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase();
