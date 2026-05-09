@@ -1366,7 +1366,7 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
   useEffect(() => {
     if (activeC && socketReady) {
       getMsgs(activeC.name).filter(m => !m.isMe && m.id).forEach(m =>
-        socketRef.current.emit("msg_status", { msgId:m.id, status:"read", to:activeC.name })
+        appSocketRef?.current?.emit("msg_status", { msgId:m.id, status:"read", to:activeC.name })
       );
     }
   }, [activeC]);
