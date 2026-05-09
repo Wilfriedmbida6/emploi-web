@@ -319,46 +319,48 @@ export default function App() {
     };
     restore();
   }, []);
+  // ─── CHARGER DONNÉES SUPABASE ─────────────────────────────────
+  const loadUsers = async (token) => {
+    try {
+      const data = await sb.select("profiles", "*", token);
+      if (Array.isArray(data) && data.length > 0) {
+        setUsers(data.map(u => ({
+          ...u,
+          avatar: u.name?.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase() || "?",
+          online: u.online || false,
+          jobs: u.jobs_done || 0,
+        })));
+      }
+    } catch(e) { console.error("loadUsers error", e); }
+  };
+
+  const loadJobs = async (token) => {
+    try {
+      const data = await sb.select("jobs", "*", token);
+      if (Array.isArray(data) && data.length > 0) setJobs(data);
+    } catch(e) { console.error("loadJobs error", e); }
+  };
+
+  // ─── SOCKET.IO — CONNEXION TEMPS RÉEL ─────────────────────────
   useEffect(() => {
-  if (!currentUser) return;
-  const socket = io(SERVER_URL, {
-    auth: { 
-      userId: currentUser.id, 
-      name: currentUser.name || currentUser.email 
-    }
-  });
-
-  // Charger les profils depuis Supabase
-const loadUsers = async (token) => {
-  const data = await sb.select("profiles", "*", token);
-  if (Array.isArray(data) && data.length > 0) {
-    setUsers(data.map(u => ({
-      ...u,
-      avatar: u.name?.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase() || "?",
-    })));
-  }
-};
-
-  socketRef.current = socket;
-  socket.on("message", (msg) => {
-    setMsgs(m => [...m, { ...msg, isMe: false }]);
-  });
-  socket.on("user_online", ({ name, online }) => {
-    setUsers(u => u.map(x => x.name === name ? { ...x, online } : x));
-  });
-  return () => socket.disconnect();
-}, [currentUser]);
-
-  // Charger les profils depuis Supabase
-const loadUsers = async (token) => {
-  const data = await sb.select("profiles", "*", token);
-  if (Array.isArray(data) && data.length > 0) {
-    setUsers(data.map(u => ({
-      ...u,
-      avatar: u.name?.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase() || "?",
-    })));
-  }
-};
+    if (!currentUser) return;
+    const socket = io(SERVER_URL, {
+      transports: ["websocket", "polling"],
+      auth: {
+        userId: currentUser.id,
+        name: currentUser.name || currentUser.email
+      }
+    });
+    socketRef.current = socket;
+    socket.on("connect", () => console.log("🟢 Socket connecté à Railway"));
+    socket.on("user_online", ({ name, online }) => {
+      setUsers(u => u.map(x => x.name === name ? { ...x, online } : x));
+    });
+    socket.on("notification", (notif) => {
+      setNotifs(n => [{ ...notif, id: Date.now(), read: false }, ...n]);
+    });
+    return () => socket.disconnect();
+  }, [currentUser]);
 
   // ─── OPEN PROFILE ─────────────────────────────────────────────
   const openProfile = (userName) => {
@@ -549,17 +551,29 @@ const loadUsers = async (token) => {
     toast$("Candidature envoyée et message transmis ! ✓");
   };
 
-  const postJob = () => {
+  const postJob = async () => {
     if (!jobForm.title || !jobForm.category) { toast$("Titre et catégorie requis", true); return; }
-    let authorName = "Moi", authorPhoto = null;
+    const authorName  = currentUser?.name || currentUser?.email || "Moi";
+    const authorPhoto = currentUser?.photo_url || null;
+    const newJob = {
+      ...jobForm,
+      posted_by: authorName,
+      posted_by_photo: authorPhoto,
+      date: new Date().toISOString().slice(0,10),
+      status: "open",
+      applicants: 0,
+    };
+    // Sauvegarder dans Supabase
     try {
-      const p = JSON.parse(localStorage.getItem("ept_profile") || "{}");
-      authorName  = p.name  || currentUser?.email || "Moi";
-      authorPhoto = localStorage.getItem("ept_photo") || null;
-    } catch(e){}
-    setJobs(j => [{ id:Date.now(), ...jobForm, postedBy:authorName, postedByPhoto:authorPhoto, date:new Date().toISOString().slice(0,10), status:"open", applicants:0 }, ...j]);
+      const saved = await sb.insert("jobs", newJob, authToken);
+      const job = Array.isArray(saved) ? saved[0] : { ...newJob, id: Date.now(), postedBy: authorName };
+      setJobs(j => [{ ...job, postedBy: job.posted_by || authorName }, ...j]);
+    } catch(e) {
+      // Fallback local si erreur
+      setJobs(j => [{ id:Date.now(), ...newJob, postedBy: authorName }, ...j]);
+    }
     setJobForm({ title:"",category:"",city:"",budget:"",urgent:false });
-    setShowJob(false); toast$("Offre publiée !");
+    setShowJob(false); toast$("Offre publiée ! ✅");
   };
 
   const filteredUsers = (list) => list.filter(u =>
@@ -1737,11 +1751,11 @@ function ProfileTab({ currentUser, doLogout, toast$, openChat, setTab }) {
 
   const [editing, setEditing]         = useState(false);
   const [form, setForm]               = useState({
-    name: savedProfile.name  || "Mon Profil",
-    city: savedProfile.city  || "Ma ville",
-    bio:  savedProfile.bio   || "Décrivez votre expérience ici...",
-    phone:savedProfile.phone || "",
-    exp:  savedProfile.exp   || "0",
+    name: currentUser?.name  || savedProfile.name  || "Mon Profil",
+    city: currentUser?.city  || savedProfile.city  || "Ma ville",
+    bio:  currentUser?.bio   || savedProfile.bio   || "Décrivez votre expérience ici...",
+    phone:currentUser?.phone || savedProfile.phone || "",
+    exp:  currentUser?.exp   || savedProfile.exp   || "0",
   });
   const [cvName, setCvName]           = useState(getSaved("ept_cv_name", null, false));
   const [photoUrl, setPhotoUrl]       = useState(getSaved("ept_photo", null, false));
@@ -1968,9 +1982,21 @@ function ProfileTab({ currentUser, doLogout, toast$, openChat, setTab }) {
         <label style={css.label}>Bio / Présentation</label>
         <textarea style={{ ...css.input, resize:"vertical", minHeight:90, marginBottom:14 }} value={form.bio} onChange={e=>setForm(f=>({...f,bio:e.target.value}))} />
         <div style={{ display:"flex", gap:10 }}>
-          <button style={{ ...css.btn(C.green), flex:2, padding:"12px 0" }} onClick={()=>{
+          <button style={{ ...css.btn(C.green), flex:2, padding:"12px 0" }} onClick={async ()=>{
             setEditing(false);
             try { localStorage.setItem("ept_profile", JSON.stringify(form)); } catch(e) {}
+            // Sauvegarder dans Supabase
+            if (currentUser?.id && currentUser?.token) {
+              try {
+                await sb.update("profiles", { id: currentUser.id }, {
+                  name: form.name,
+                  phone: form.phone,
+                  city: form.city,
+                  exp: parseInt(form.exp) || 0,
+                  bio: form.bio,
+                }, currentUser.token);
+              } catch(e) { console.error("Erreur sauvegarde profil", e); }
+            }
             toast$("Profil mis à jour ✓");
           }}>✓ Sauvegarder</button>
           <button style={{ ...css.btn("#1e3a52"), flex:1, border:`1px solid ${C.border}` }} onClick={()=>setEditing(false)}>Annuler</button>
