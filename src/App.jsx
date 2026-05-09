@@ -247,10 +247,6 @@ export default function App() {
   const [adminNotifs, setAdminNotifs] = useState(mockAdminNotifs); // notifs admin seulement
   const [msgs, setMsgs]     = useState(mockMessages);
   const [jobForm, setJobForm] = useState({ title:"", category:"", city:"", budget:"", urgent:false });
-  // ✅ États globaux partagés avec ChatTab via props
-  const [localMsgsGlobal, setLocalMsgsGlobal] = useState(() => { try { return JSON.parse(localStorage.getItem("ept_msgs") || "{}"); } catch { return {}; } });
-  const [msgStatusGlobal, setMsgStatusGlobal] = useState({});
-  const [typingGlobal, setTypingGlobal]       = useState({});
 
   // Form fields
   const [email, setEmail]   = useState("");
@@ -362,20 +358,6 @@ export default function App() {
     });
     socket.on("notification", (notif) => {
       setNotifs(n => [{ ...notif, id: Date.now(), read: false }, ...n]);
-    });
-    // ✅ Messages entrants gérés ici (un seul socket)
-    socket.on("message", (m) => {
-      setLocalMsgsGlobal(prev => {
-        const updated = { ...prev, [m.from]: [...(prev[m.from] || []), { ...m, isMe: false }] };
-        try { localStorage.setItem("ept_msgs", JSON.stringify(updated)); } catch {}
-        return updated;
-      });
-    });
-    socket.on("msg_status", ({ msgId, status }) => {
-      setMsgStatusGlobal(s => ({ ...s, [msgId]: status }));
-    });
-    socket.on("typing", ({ from, typing }) => {
-      setTypingGlobal(t => ({ ...t, [from]: typing }));
     });
     return () => socket.disconnect();
   }, [currentUser]);
@@ -808,7 +790,7 @@ export default function App() {
         {tab==="home"        && <HomeTab users={users} jobs={jobs} setTab={setTab} toast$={toast$} openChat={openChat} handlePostuler={handlePostuler} setOnlineFilter={setOnlineFilter} openProfile={openProfile} />}
         {tab==="jobs"        && <JobsTab jobs={jobs} setJobs={setJobs} showJob={showJob} setShowJob={setShowJob} jobForm={jobForm} setJobForm={setJobForm} postJob={postJob} toast$={toast$} currentUser={currentUser} setTab={setTab} openChat={openChat} handlePostuler={handlePostuler} highlightJob={highlightJob} prevTab={prevTab} openProfile={openProfile} />}
         {tab==="techniciens" && <TechsTab users={filteredUsers(users.filter(u=>u.role==="technicien" && (!onlineFilter || u.online)))} searchQ={searchQ} setSearchQ={setSearchQ} selUser={selUser} setSelUser={setSelUser} setTab={setTab} toast$={toast$} myRatings={myRatings} setMyRatings={setMyRatings} openChat={openChat} onlineFilter={onlineFilter} setOnlineFilter={setOnlineFilter} viewProfileUser={viewProfileUser} setViewProfileUser={setViewProfileUser} />}
-        {tab==="chat"        && <ChatTab msgs={msgs} setMsgs={setMsgs} newMsg={newMsg} setNewMsg={setNewMsg} sendMsg={sendMsg} chatRef={chatRef} voiceOn={voiceOn} setVoiceOn={setVoiceOn} activeChatContact={activeChatContact} setActiveChatContact={setActiveChatContact} setTab={setTab} prevTab={prevTab} currentUser={currentUser} socketRef={socketRef} localMsgsGlobal={localMsgsGlobal} setLocalMsgsGlobal={setLocalMsgsGlobal} msgStatusGlobal={msgStatusGlobal} typingGlobal={typingGlobal} />}
+        {tab==="chat"        && <ChatTab msgs={msgs} setMsgs={setMsgs} newMsg={newMsg} setNewMsg={setNewMsg} sendMsg={sendMsg} chatRef={chatRef} voiceOn={voiceOn} setVoiceOn={setVoiceOn} activeChatContact={activeChatContact} setActiveChatContact={setActiveChatContact} setTab={setTab} prevTab={prevTab} currentUser={currentUser} />}
         {tab==="profile"     && <ProfileTab currentUser={currentUser} doLogout={doLogout} toast$={toast$} openChat={openChat} setTab={setTab} />}
         {tab==="notifs"      && <NotifsTab notifs={notifs} setNotifs={setNotifs} unread={unread} setTab={setTab} openChat={openChat} setHighlightJob={setHighlightJob} />}
       </div>
@@ -1284,13 +1266,12 @@ const DEFAULT_CONTACTS = [
   { name:"Kofi Atta",      online:false, initials:"KA", color:"#6A1B9A" },
 ];
 
-function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, setVoiceOn, activeChatContact, setActiveChatContact, setTab, prevTab, currentUser, socketRef: socketRefProp, localMsgsGlobal, setLocalMsgsGlobal, msgStatusGlobal, typingGlobal }) {
+function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, setVoiceOn, activeChatContact, setActiveChatContact, setTab, prevTab, currentUser }) {
   const [activeC, setActiveC]               = useState(null);
-  // ✅ Utiliser les états globaux passés par App (un seul socket)
-  const localMsgs    = localMsgsGlobal || {};
-  const typingContacts = typingGlobal  || {};
-  const msgStatus    = msgStatusGlobal || {};
-  const [socketReady, setSocketReady]       = useState(!!socketRefProp?.current?.connected);
+  const [localMsgs, setLocalMsgs]           = useState(() => { try { return JSON.parse(localStorage.getItem('ept_msgs')||'{}'); } catch{return {};} });
+  const [typingContacts, setTypingContacts] = useState({});
+  const [msgStatus, setMsgStatus]           = useState({});
+  const [socketReady, setSocketReady]       = useState(false);
   const [selectedMsg, setSelectedMsg]       = useState(null); // menu contextuel long-press
 
   // Voix
@@ -1304,6 +1285,7 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
   const voiceTimerRef = useRef(null);
   const audioPreviewRef = useRef(null);
 
+  const socketRef     = useRef(null);
   const timerRef      = useRef(null);
   const typingTimer   = useRef(null);
   const chatBottomRef = useRef(null);
@@ -1311,18 +1293,66 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
   const myName = currentUser?.name || "Moi";
   const fmtSecs = (s) => `${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
 
-  // ── Socket partagé depuis App root ────────────────────────
-  const socketRef = socketRefProp || { current: null };
+  // ── Init Socket.io ─────────────────────────────────────────
   useEffect(() => {
-    const s = socketRef.current;
-    if (!s) return;
-    setSocketReady(s.connected);
-    const onConnect    = () => setSocketReady(true);
-    const onDisconnect = () => setSocketReady(false);
-    s.on("connect",    onConnect);
-    s.on("disconnect", onDisconnect);
-    return () => { s.off("connect", onConnect); s.off("disconnect", onDisconnect); };
-  }, [socketRefProp?.current]);
+    // Charger socket.io-client depuis CDN
+    const loadSocket = () => {
+      const socket = window.io(SERVER_URL, {
+        transports: ["websocket", "polling"],
+        auth: { userId: currentUser?.id || "guest", name: myName },
+      });
+      socketRef.current = socket;
+
+      socket.on("connect",    () => { setSocketReady(true);  console.log("🟢 Socket connecté"); });
+      socket.on("disconnect", () => { setSocketReady(false); console.log("🔴 Socket déconnecté"); });
+
+      // Message entrant
+      socket.on("message", (m) => {
+        setLocalMsgs(prev => {
+          const next = { ...prev, [m.from]: [...(prev[m.from]||[]), { ...m, isMe: false }] };
+          try { localStorage.setItem('ept_msgs', JSON.stringify(next)); } catch{}
+          return next;
+        });
+        // Marquer comme "read" si on est dans cette conv
+        setActiveC(cur => {
+          if (cur?.name === m.from) {
+            socket.emit("msg_status", { msgId: m.id, status: "read", to: m.from });
+          }
+          return cur;
+        });
+      });
+
+      // Mise à jour statut (delivered / read)
+      socket.on("msg_status", ({ msgId, status }) => {
+        setMsgStatus(s => ({ ...s, [msgId]: status }));
+      });
+
+      // Indicateur frappe
+      socket.on("typing", ({ from, typing }) => {
+        setTypingContacts(t => ({ ...t, [from]: typing }));
+        if (typing) {
+          clearTimeout(typingTimer.current);
+          typingTimer.current = setTimeout(() =>
+            setTypingContacts(t => ({ ...t, [from]: false })), 3000);
+        }
+      });
+
+      // Statut en ligne
+      socket.on("user_online", ({ name, online }) => {
+        // On pourrait mettre à jour la liste des contacts ici
+      });
+    };
+
+    if (window.io) { loadSocket(); }
+    else {
+      const s = document.createElement("script");
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js";
+      s.onload = loadSocket;
+      document.head.appendChild(s);
+    }
+
+    return () => { socketRef.current?.disconnect(); };
+  }, []);
 
   // ── Envoi message texte ────────────────────────────────────
   const addMsg = (contactName, text) => {
@@ -1330,28 +1360,35 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
     const msgId = Date.now();
     const m     = { id:msgId, from:myName, text, time, isMe:true, status:"sent" };
 
-    // ✅ Sauvegarder dans l'état global (partagé avec App)
-    setLocalMsgsGlobal(prev => {
-      const updated = { ...prev, [contactName]: [...(prev[contactName]||[]), m] };
-      try { localStorage.setItem("ept_msgs", JSON.stringify(updated)); } catch {}
-      return updated;
+    setLocalMsgs(prev => {
+      const next = { ...prev, [contactName]: [...(prev[contactName]||[]), m] };
+      try { localStorage.setItem('ept_msgs', JSON.stringify(next)); } catch{}
+      return next;
     });
+    setMsgStatus(s => ({ ...s, [msgId]: "sent" }));
 
-    // ✅ Envoyer via le socket partagé du App root
-    const sock = socketRef.current;
-    if (sock?.connected) {
-      sock.emit("message", { to: contactName, text, msgId });
+    if (socketReady) {
+      // Envoi réel via Socket.io
+      socketRef.current.emit("message", { to:contactName, text, msgId });
+    } else {
+      // Mode démo hors ligne
+      if (contactName === "Mamadou Diallo") sendMsg(text);
+      setTimeout(() => setMsgStatus(s => ({ ...s, [msgId]: "delivered" })), 600);
+      setTimeout(() => setTypingContacts(t => ({ ...t, [contactName]: true })), 1500);
+      setTimeout(() => {
+        setTypingContacts(t => ({ ...t, [contactName]: false }));
+        setMsgStatus(s => ({ ...s, [msgId]: "read" }));
+      }, 4000);
     }
   };
 
   // ── Indicateur frappe sortant ──────────────────────────────
   const onTyping = () => {
-    const sock = socketRef.current;
-    if (!sock?.connected || !activeC) return;
-    sock.emit("typing", { to: activeC.name, typing: true });
+    if (!socketReady || !activeC) return;
+    socketRef.current.emit("typing", { to: activeC.name, typing: true });
     clearTimeout(typingTimer.current);
     typingTimer.current = setTimeout(() =>
-      sock?.emit("typing", { to: activeC.name, typing: false }), 2000);
+      socketRef.current?.emit("typing", { to: activeC.name, typing: false }), 2000);
   };
 
   // ── Marquer comme lu en ouvrant la conv ───────────────────
@@ -1449,23 +1486,11 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
         </div>
       </div>
 
-      {activeChatContact && !DEFAULT_CONTACTS.find(c=>c.name===activeChatContact?.name) && (
-        <div style={{ background:"#1E88E522", borderRadius:14, padding:14, marginBottom:10, display:"flex", alignItems:"center", gap:12, border:"1px solid #1E88E544", cursor:"pointer" }}
-          onClick={()=>setActiveC(activeChatContact)}>
-          <div style={{ position:"relative" }}>
-            <div style={{ width:50, height:50, borderRadius:"50%", background:getColor(activeChatContact.name), display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800, fontSize:16, color:"#fff" }}>
-              {activeChatContact.name.split(" ").map(w=>w[0]).join("").slice(0,2)}
-            </div>
-            <div style={{ position:"absolute", bottom:1, right:1, width:12, height:12, borderRadius:"50%", background:"#00E676", border:"2px solid #122236" }} />
-          </div>
-          <div style={{ flex:1 }}>
-            <div style={{ fontWeight:700, fontSize:14, color:"#E8F0FE" }}>{activeChatContact.name}</div>
-            <div style={{ fontSize:12, color:"#1E88E5", marginTop:2 }}>Nouvelle conversation · Tap pour ouvrir</div>
-          </div>
-        </div>
-      )}
-
-      {DEFAULT_CONTACTS.map(c => {
+      {/* Contacts réels depuis localStorage */}
+      {(() => {
+        const realNames = Object.keys(localMsgs).filter(n => n && !DEFAULT_CONTACTS.find(d => d.name === n));
+        const allContacts = [...DEFAULT_CONTACTS, ...realNames.map(n => ({ name:n, online:true, initials:n.split(" ").map(w=>w[0]).join("").slice(0,2) }))];
+        return allContacts.map(c => {
         const allMsgs = getMsgs(c.name);
         const last    = allMsgs[allMsgs.length-1];
         const unread  = allMsgs.filter(m => !m.isMe && !m.read).length;
@@ -1490,7 +1515,8 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
             </div>
           </div>
         );
-      })}
+        });
+      })()}
     </>
   );
 
