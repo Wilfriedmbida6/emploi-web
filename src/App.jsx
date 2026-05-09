@@ -1472,6 +1472,9 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
   };
 
   // ── LISTE DES CONVERSATIONS ────────────────────────────────
+  const realNames = Object.keys(localMsgs).filter(n => n && !DEFAULT_CONTACTS.find(d => d.name === n));
+  const allContacts = [...DEFAULT_CONTACTS, ...realNames.map(n => ({ name:n, online:true, initials:n.split(" ").map(w=>w[0]).join("").slice(0,2) }))];
+
   if (!activeC) return (
     <>
       <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:20 }}>
@@ -1486,11 +1489,7 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
         </div>
       </div>
 
-      {/* Contacts réels depuis localStorage */}
-      {(() => {
-        const realNames = Object.keys(localMsgs).filter(n => n && !DEFAULT_CONTACTS.find(d => d.name === n));
-        const allContacts = [...DEFAULT_CONTACTS, ...realNames.map(n => ({ name:n, online:true, initials:n.split(" ").map(w=>w[0]).join("").slice(0,2) }))];
-        return allContacts.map(c => {
+      {allContacts.map(c => {
         const allMsgs = getMsgs(c.name);
         const last    = allMsgs[allMsgs.length-1];
         const unread  = allMsgs.filter(m => !m.isMe && !m.read).length;
@@ -1515,8 +1514,7 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
             </div>
           </div>
         );
-        });
-      })()}
+      })}
     </>
   );
 
