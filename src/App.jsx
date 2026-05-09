@@ -123,39 +123,13 @@ const ADMIN_PASS  = "Admin@2025!";
 // ══════════════════════════════════════════════════════════════
 //  DONNÉES DE DÉMONSTRATION
 // ══════════════════════════════════════════════════════════════
-const mockUsers = [
-  { id:1, name:"Mamadou Diallo",  role:"technicien", avatar:"MD", city:"Dakar",   rating:4.8, exp:7,  skills:["Plomberie","Électricité"], status:"active", joined:"2025-01-10", jobs:34, online:true },
-  { id:2, name:"Fatou Ndiaye",    role:"technicien", avatar:"FN", city:"Abidjan", rating:4.5, exp:3,  skills:["Peinture","Carrelage"],    status:"active", joined:"2025-02-15", jobs:18, online:false },
-  { id:3, name:"Kofi Atta",       role:"technicien", avatar:"KA", city:"Accra",   rating:4.9, exp:12, skills:["Menuiserie","Soudure"],    status:"active", joined:"2024-11-01", jobs:87, online:true },
-  { id:4, name:"Aminata Touré",   role:"client",     avatar:"AT", city:"Conakry", rating:4.2, exp:0,  skills:[],                          status:"active", joined:"2025-03-05", jobs:0,  online:true },
-  { id:5, name:"Ibrahima Sow",    role:"technicien", avatar:"IS", city:"Bamako",  rating:3.9, exp:5,  skills:["Climatisation"],           status:"muted",  joined:"2025-01-22", jobs:21, online:false },
-  { id:6, name:"Aïcha Coulibaly", role:"client",     avatar:"AC", city:"Lomé",    rating:4.6, exp:0,  skills:[],                          status:"active", joined:"2025-04-01", jobs:0,  online:true },
-];
-const mockJobs = [
-  { id:1, title:"Réparation fuite d'eau urgente",   category:"Plomberie",    city:"Dakar",   budget:"15 000 FCFA",  urgent:true,  postedBy:"Aminata Touré",   date:"2025-04-29", status:"open",   applicants:3 },
-  { id:2, title:"Installation panneau solaire 5kW", category:"Électricité",  city:"Abidjan", budget:"450 000 FCFA", urgent:false, postedBy:"Aïcha Coulibaly", date:"2025-04-28", status:"open",   applicants:7 },
-  { id:3, title:"Peinture appartement F4",          category:"Peinture",     city:"Accra",   budget:"80 000 FCFA",  urgent:false, postedBy:"Aminata Touré",   date:"2025-04-27", status:"closed", applicants:12 },
-  { id:4, title:"Climatisation bureau 3 pièces",    category:"Climatisation",city:"Bamako",  budget:"120 000 FCFA", urgent:true,  postedBy:"Aïcha Coulibaly", date:"2025-04-29", status:"open",   applicants:2 },
-  { id:5, title:"Carrelage cuisine + bain",         category:"Carrelage",    city:"Lomé",    budget:"95 000 FCFA",  urgent:false, postedBy:"Aminata Touré",   date:"2025-04-26", status:"open",   applicants:5 },
-];
+const mockUsers = [];
+const mockJobs = [];
 // Notifs admin (new_user, report = admin seulement)
-const mockAdminNotifs = [
-  { id:1, type:"new_user",    msg:"Nouveau membre : Aïcha Coulibaly",      time:"Il y a 2h", read:false },
-  { id:2, type:"new_job",     msg:"Nouvelle offre : Installation solaire", time:"Il y a 3h", read:false },
-  { id:3, type:"report",      msg:"Signalement sur Ibrahima Sow",          time:"Il y a 5h", read:false },
-  { id:4, type:"new_user",    msg:"Nouveau membre : Kofi Atta",            time:"Il y a 1j", read:true  },
-];
+const mockAdminNotifs = [];
 // Notifs utilisateur (messages, offres, candidatures — PAS new_user ni report)
-const mockNotifs = [
-  { id:2, type:"new_job",     msg:"Nouvelle offre : Installation solaire", time:"Il y a 3h", read:false },
-  { id:5, type:"message",     msg:"Nouveau message de Mamadou Diallo",     time:"Il y a 1j", read:true, from:"Mamadou Diallo" },
-  { id:6, type:"application", msg:"Candidature reçue pour votre offre",   time:"Il y a 2j", read:true  },
-];
-const mockMessages = [
-  { id:1, from:"Mamadou Diallo", text:"Bonjour ! J'ai un problème avec mon profil.", time:"10:30", isMe:false },
-  { id:2, from:"Moi",            text:"Bonjour, quel est le problème exactement ?",  time:"10:32", isMe:true  },
-  { id:3, from:"Mamadou Diallo", text:"Je n'arrive pas à uploader mon CV.",           time:"10:33", isMe:false },
-];
+const mockNotifs = [];
+const mockMessages = [];
 const CATEGORIES = [
   "Plomberie","Électricité","Peinture","Menuiserie","Carrelage",
   "Climatisation","Soudure","Jardinage","Nettoyage","Sécurité",
@@ -241,11 +215,11 @@ export default function App() {
   const chatRef = useRef(null);
 
   // Data
-  const [users, setUsers]   = useState(mockUsers);
-  const [jobs, setJobs]     = useState(mockJobs);
-  const [notifs, setNotifs] = useState(mockNotifs);         // notifs utilisateur
-  const [adminNotifs, setAdminNotifs] = useState(mockAdminNotifs); // notifs admin seulement
-  const [msgs, setMsgs]     = useState(mockMessages);
+  const [users, setUsers]   = useState([]);
+  const [jobs, setJobs]     = useState([]);
+  const [notifs, setNotifs] = useState([]);
+  const [adminNotifs, setAdminNotifs] = useState([]);
+  const [msgs, setMsgs]     = useState([]);
   const [jobForm, setJobForm] = useState({ title:"", category:"", city:"", budget:"", urgent:false });
 
   // Form fields
@@ -821,11 +795,19 @@ export default function App() {
   // ══════════════════════════════════════════════════════════════
   //  UTILISATEUR
   // ══════════════════════════════════════════════════════════════
+  // ✅ FIX 5 — Badge chat = nb messages non lus depuis localStorage
+  const chatUnread = (() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem("ept_msgs") || "{}");
+      return Object.values(stored).flat().filter(m => !m.isMe && !m.read).length;
+    } catch { return 0; }
+  })();
+
   const userTabs = [
     { id:"home",        icon:"🏠", label:"Accueil" },
     { id:"jobs",        icon:"💼", label:"Offres" },
     { id:"techniciens", icon:"🔧", label:"Techs" },
-    { id:"chat",        icon:"💬", label:"Chat" },
+    { id:"chat",        icon:"💬", label:"Chat",  badge: chatUnread },
     { id:"profile",     icon:"👤", label:"Profil" },
   ];
   return (
@@ -1319,9 +1301,7 @@ function NotifsTab({ notifs, setNotifs, unread, setTab, openChat, setHighlightJo
 }
 
 const DEFAULT_CONTACTS = [
-  { name:"Support EPT",    online:true,  initials:"SE", color:"#C62828" },
-  { name:"Mamadou Diallo", online:true,  initials:"MD", color:"#1565C0" },
-  { name:"Kofi Atta",      online:false, initials:"KA", color:"#6A1B9A" },
+  { name:"Support EPT", online:true, initials:"SE", color:"#C62828" },
 ];
 
 function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, setVoiceOn, activeChatContact, setActiveChatContact, setTab, prevTab, currentUser }) {
@@ -1367,8 +1347,11 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
       // Message entrant
       socket.on("message", (m) => {
         setLocalMsgs(prev => {
-          const next = { ...prev, [m.from]: [...(prev[m.from]||[]), { ...m, isMe: false }] };
-          try { localStorage.setItem('ept_msgs', JSON.stringify(next)); } catch{}
+          // ✅ FIX 7 — message marqué non lu par défaut pour le badge
+          const isOpen = activeC?.name === m.from;
+          const newMsg = { ...m, isMe: false, read: isOpen };
+          const next = { ...prev, [m.from]: [...(prev[m.from]||[]), newMsg] };
+          try { localStorage.setItem("ept_msgs", JSON.stringify(next)); } catch{}
           return next;
         });
         // Marquer comme "read" si on est dans cette conv
@@ -1409,7 +1392,9 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
       document.head.appendChild(s);
     }
 
-    return () => { socketRef.current?.disconnect(); };
+    // ✅ FIX 4 — NE PAS déconnecter en quittant l'onglet chat
+    // Le socket reste vivant tant que l'utilisateur est connecté
+    return () => {};
   }, []);
 
   // ── Envoi message texte ────────────────────────────────────
@@ -1430,13 +1415,8 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
       socketRef.current.emit("message", { to:contactName, text, msgId });
     } else {
       // Mode démo hors ligne
-      if (contactName === "Mamadou Diallo") sendMsg(text);
+      // Mode hors ligne — statut simulé
       setTimeout(() => setMsgStatus(s => ({ ...s, [msgId]: "delivered" })), 600);
-      setTimeout(() => setTypingContacts(t => ({ ...t, [contactName]: true })), 1500);
-      setTimeout(() => {
-        setTypingContacts(t => ({ ...t, [contactName]: false }));
-        setMsgStatus(s => ({ ...s, [msgId]: "read" }));
-      }, 4000);
     }
   };
 
@@ -1451,7 +1431,17 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
 
   // ── Marquer comme lu en ouvrant la conv ───────────────────
   useEffect(() => {
-    if (activeC && socketReady) {
+    if (!activeC) return;
+    // ✅ FIX 6 — Marquer tous les messages de cette conv comme lus
+    setLocalMsgs(prev => {
+      const convMsgs = (prev[activeC.name] || []).map(m =>
+        (!m.isMe && !m.read) ? { ...m, read: true } : m
+      );
+      const next = { ...prev, [activeC.name]: convMsgs };
+      try { localStorage.setItem("ept_msgs", JSON.stringify(next)); } catch {}
+      return next;
+    });
+    if (socketReady) {
       getMsgs(activeC.name).filter(m => !m.isMe && m.id).forEach(m =>
         socketRef.current.emit("msg_status", { msgId:m.id, status:"read", to:activeC.name })
       );
@@ -1525,8 +1515,8 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
   useEffect(() => { chatBottomRef.current?.scrollIntoView({ behavior:"smooth" }); }, [localMsgs, activeC]);
 
   const getMsgs = (name) => {
-    const base = name === "Mamadou Diallo" ? msgs.map(m => ({ ...m, status:m.isMe?"read":undefined })) : [];
-    return [...base, ...(localMsgs[name]||[])];
+    // Uniquement les vrais messages reçus/envoyés via socket
+    return localMsgs[name] || [];
   };
 
   // ── LISTE DES CONVERSATIONS ────────────────────────────────
