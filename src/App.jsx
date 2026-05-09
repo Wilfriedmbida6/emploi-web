@@ -359,6 +359,28 @@ export default function App() {
     socket.on("notification", (notif) => {
       setNotifs(n => [{ ...notif, id: Date.now(), read: false }, ...n]);
     });
+
+    // ── Réception message entrant ──────────────────────────────
+    socket.on("message", (payload) => {
+      setMsgs(m => [...m, {
+        id:    payload.id || Date.now(),
+        from:  payload.from,
+        text:  payload.text,
+        time:  payload.time || new Date().toLocaleTimeString("fr", {hour:"2-digit", minute:"2-digit"}),
+        isMe:  false,
+      }]);
+      setTimeout(() => chatRef.current?.scrollTo(0, 9999), 80);
+    });
+
+    // ── Nouvelle offre publiée par quelqu'un d'autre ───────────
+    socket.on("new_job", (job) => {
+      setJobs(prev => {
+        if (prev.find(j => j.id === job.id)) return prev;
+        return [{ ...job, postedBy: job.posted_by || job.postedBy }, ...prev];
+      });
+      setNotifs(n => [{ id: Date.now(), type:"new_job", msg:`📢 Nouvelle offre : ${job.title}`, time:"À l'instant", read:false }, ...n]);
+    });
+
     return () => socket.disconnect();
   }, [currentUser]);
 
@@ -567,10 +589,15 @@ export default function App() {
     try {
       const saved = await sb.insert("jobs", newJob, authToken);
       const job = Array.isArray(saved) ? saved[0] : { ...newJob, id: Date.now(), postedBy: authorName };
-      setJobs(j => [{ ...job, postedBy: job.posted_by || authorName }, ...j]);
+      const jobWithAuthor = { ...job, postedBy: job.posted_by || authorName };
+      setJobs(j => [jobWithAuthor, ...j]);
+      // 🔴 BROADCAST aux autres utilisateurs connectés
+      socketRef.current?.emit("new_job", jobWithAuthor);
     } catch(e) {
       // Fallback local si erreur
-      setJobs(j => [{ id:Date.now(), ...newJob, postedBy: authorName }, ...j]);
+      const fallback = { id: Date.now(), ...newJob, postedBy: authorName };
+      setJobs(j => [fallback, ...j]);
+      socketRef.current?.emit("new_job", fallback);
     }
     setJobForm({ title:"",category:"",city:"",budget:"",urgent:false });
     setShowJob(false); toast$("Offre publiée ! ✅");
