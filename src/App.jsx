@@ -1342,11 +1342,14 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
       try { localStorage.setItem('ept_msgs', JSON.stringify(next)); } catch{}
       return next;
     });
-    setMsgStatus(s => ({ ...s, [msgId]: "sent" }));
+    setChatStatus(s => ({ ...s, [msgId]: "sent" }));
 
     const sock = appSocketRef?.current;
     if (sock?.connected) {
       sock.emit("message", { to: contactName, text, msgId });
+      console.log("📤 Message envoyé à", contactName);
+    } else {
+      console.warn("⚠️ Socket non connecté", sock);
     }
   };
 
