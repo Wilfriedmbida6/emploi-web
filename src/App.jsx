@@ -356,9 +356,42 @@ export default function App() {
     socket.on("user_online", ({ name, online }) => {
       setUsers(u => u.map(x => x.name === name ? { ...x, online } : x));
     });
+
+    // ✅ BUG 1 CORRIGÉ — Réception messages en temps réel
+    socket.on("message", (payload) => {
+      setMsgs(m => {
+        // Éviter les doublons
+        if (m.find(x => x.id === payload.id)) return m;
+        return [...m, {
+          id:    payload.id,
+          from:  payload.from,
+          text:  payload.text,
+          time:  payload.time || new Date().toLocaleTimeString("fr",{hour:"2-digit",minute:"2-digit"}),
+          isMe:  false,
+          isVoice: payload.isVoice || false,
+          voiceUrl: payload.voiceUrl,
+          voiceDur: payload.voiceDur,
+        }];
+      });
+    });
+
+    // ✅ BUG 1b — Réception nouvelles offres en temps réel
+    socket.on("new_job", (job) => {
+      setJobs(prev => {
+        if (prev.find(j => j.id === job.id)) return prev;
+        return [{ ...job, postedBy: job.posted_by || job.postedBy }, ...prev];
+      });
+      setNotifs(n => [{
+        id: Date.now(), type:"new_job",
+        msg: `💼 Nouvelle offre : ${job.title}`,
+        time:"À l'instant", read:false,
+      }, ...n]);
+    });
+
     socket.on("notification", (notif) => {
       setNotifs(n => [{ ...notif, id: Date.now(), read: false }, ...n]);
     });
+
     return () => socket.disconnect();
   }, [currentUser]);
 
@@ -545,9 +578,20 @@ export default function App() {
 
     // Mettre à jour le nb de candidats
     setJobs(jj => jj.map(j => j.id===job.id ? { ...j, applicants:(j.applicants||0)+1 } : j));
-    // Ouvrir le chat avec le propriétaire et envoyer le message
-    sendMsg(msgText);
+    // ✅ BUG 3 CORRIGÉ — ouvrir le chat D'ABORD, puis émettre le message
+    // avec le bon destinataire (dest) explicitement
     openChat(dest, true);
+    setTimeout(() => {
+      if (socketRef.current?.connected) {
+        const msgId = Date.now();
+        socketRef.current.emit("message", { to: dest, text: msgText, msgId });
+      }
+      setMsgs(m => [...m, {
+        id: Date.now(), from:"Moi", text: msgText,
+        time: new Date().toLocaleTimeString("fr",{hour:"2-digit",minute:"2-digit"}),
+        isMe: true,
+      }]);
+    }, 100);
     toast$("Candidature envoyée et message transmis ! ✓");
   };
 
@@ -564,14 +608,28 @@ export default function App() {
       applicants: 0,
     };
     // Sauvegarder dans Supabase
+    let finalJob;
     try {
       const saved = await sb.insert("jobs", newJob, authToken);
-      const job = Array.isArray(saved) ? saved[0] : { ...newJob, id: Date.now(), postedBy: authorName };
-      setJobs(j => [{ ...job, postedBy: job.posted_by || authorName }, ...j]);
-    } catch(e) {
-      // Fallback local si erreur
-      setJobs(j => [{ id:Date.now(), ...newJob, postedBy: authorName }, ...j]);
+      finalJob = Array.isArray(saved) ? saved[0] : null;
+    } catch(e) { finalJob = null; }
+
+    // Construire l'objet job final avec un id stable
+    const jobWithId = {
+      ...newJob,
+      id:       finalJob?.id       || Date.now(),
+      postedBy: finalJob?.posted_by || authorName,
+      posted_by: authorName,
+    };
+
+    // Ajouter localement
+    setJobs(j => [jobWithId, ...j]);
+
+    // ✅ BUG 2 CORRIGÉ — Broadcaster à tous les clients connectés
+    if (socketRef.current?.connected) {
+      socketRef.current.emit("new_job", jobWithId);
     }
+
     setJobForm({ title:"",category:"",city:"",budget:"",urgent:false });
     setShowJob(false); toast$("Offre publiée ! ✅");
   };
