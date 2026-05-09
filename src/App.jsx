@@ -359,28 +359,6 @@ export default function App() {
     socket.on("notification", (notif) => {
       setNotifs(n => [{ ...notif, id: Date.now(), read: false }, ...n]);
     });
-
-    // ── Réception message entrant ──────────────────────────────
-    socket.on("message", (payload) => {
-      setMsgs(m => [...m, {
-        id:    payload.id || Date.now(),
-        from:  payload.from,
-        text:  payload.text,
-        time:  payload.time || new Date().toLocaleTimeString("fr", {hour:"2-digit", minute:"2-digit"}),
-        isMe:  false,
-      }]);
-      setTimeout(() => chatRef.current?.scrollTo(0, 9999), 80);
-    });
-
-    // ── Nouvelle offre publiée par quelqu'un d'autre ───────────
-    socket.on("new_job", (job) => {
-      setJobs(prev => {
-        if (prev.find(j => j.id === job.id)) return prev;
-        return [{ ...job, postedBy: job.posted_by || job.postedBy }, ...prev];
-      });
-      setNotifs(n => [{ id: Date.now(), type:"new_job", msg:`📢 Nouvelle offre : ${job.title}`, time:"À l'instant", read:false }, ...n]);
-    });
-
     return () => socket.disconnect();
   }, [currentUser]);
 
@@ -589,15 +567,10 @@ export default function App() {
     try {
       const saved = await sb.insert("jobs", newJob, authToken);
       const job = Array.isArray(saved) ? saved[0] : { ...newJob, id: Date.now(), postedBy: authorName };
-      const jobWithAuthor = { ...job, postedBy: job.posted_by || authorName };
-      setJobs(j => [jobWithAuthor, ...j]);
-      // 🔴 BROADCAST aux autres utilisateurs connectés
-      socketRef.current?.emit("new_job", jobWithAuthor);
+      setJobs(j => [{ ...job, postedBy: job.posted_by || authorName }, ...j]);
     } catch(e) {
       // Fallback local si erreur
-      const fallback = { id: Date.now(), ...newJob, postedBy: authorName };
-      setJobs(j => [fallback, ...j]);
-      socketRef.current?.emit("new_job", fallback);
+      setJobs(j => [{ id:Date.now(), ...newJob, postedBy: authorName }, ...j]);
     }
     setJobForm({ title:"",category:"",city:"",budget:"",urgent:false });
     setShowJob(false); toast$("Offre publiée ! ✅");
@@ -1295,7 +1268,15 @@ const DEFAULT_CONTACTS = [
 
 function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, setVoiceOn, activeChatContact, setActiveChatContact, setTab, prevTab, currentUser }) {
   const [activeC, setActiveC]               = useState(null);
-  const [localMsgs, setLocalMsgs]           = useState({});
+  const [localMsgs, setLocalMsgs] = useState(() => { try { return JSON.parse(localStorage.getItem("ept_msgs") || "{}"); } catch { return {}; } });
+  // ✅ Persister les messages dans localStorage à chaque changement
+  const saveLocalMsgs = (updater) => {
+    setLocalMsgs(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      try { localStorage.setItem('ept_msgs', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
   const [typingContacts, setTypingContacts] = useState({});
   const [msgStatus, setMsgStatus]           = useState({});
   const [socketReady, setSocketReady]       = useState(false);
@@ -1335,7 +1316,7 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
 
       // Message entrant
       socket.on("message", (m) => {
-        setLocalMsgs(prev => ({
+        saveLocalMsgs(prev => ({
           ...prev,
           [m.from]: [...(prev[m.from] || []), { ...m, isMe: false }]
         }));
@@ -1386,7 +1367,7 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
     const msgId = Date.now();
     const m     = { id:msgId, from:myName, text, time, isMe:true, status:"sent" };
 
-    setLocalMsgs(prev => ({ ...prev, [contactName]: [...(prev[contactName]||[]), m] }));
+    saveLocalMsgs(prev => ({ ...prev, [contactName]: [...(prev[contactName]||[]), m] }));
     setMsgStatus(s => ({ ...s, [msgId]: "sent" }));
 
     if (socketReady) {
@@ -1465,7 +1446,7 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
     const msgId = Date.now();
     const time  = new Date().toLocaleTimeString("fr", { hour:"2-digit", minute:"2-digit" });
     const m     = { id:msgId, from:myName, text:"", time, isMe:true, status:"sent", isVoice:true, voiceUrl, voiceDur:dur };
-    setLocalMsgs(prev => ({ ...prev, [contactName]: [...(prev[contactName]||[]), m] }));
+    saveLocalMsgs(prev => ({ ...prev, [contactName]: [...(prev[contactName]||[]), m] }));
     setMsgStatus(s => ({ ...s, [msgId]: "sent" }));
     // Note: upload audio via Socket en étape suivante
     setTimeout(() => setMsgStatus(s => ({ ...s, [msgId]: "delivered" })), 500);
@@ -1508,23 +1489,12 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
         </div>
       </div>
 
-      {activeChatContact && !DEFAULT_CONTACTS.find(c=>c.name===activeChatContact?.name) && (
-        <div style={{ background:"#1E88E522", borderRadius:14, padding:14, marginBottom:10, display:"flex", alignItems:"center", gap:12, border:"1px solid #1E88E544", cursor:"pointer" }}
-          onClick={()=>setActiveC(activeChatContact)}>
-          <div style={{ position:"relative" }}>
-            <div style={{ width:50, height:50, borderRadius:"50%", background:getColor(activeChatContact.name), display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800, fontSize:16, color:"#fff" }}>
-              {activeChatContact.name.split(" ").map(w=>w[0]).join("").slice(0,2)}
-            </div>
-            <div style={{ position:"absolute", bottom:1, right:1, width:12, height:12, borderRadius:"50%", background:"#00E676", border:"2px solid #122236" }} />
-          </div>
-          <div style={{ flex:1 }}>
-            <div style={{ fontWeight:700, fontSize:14, color:"#E8F0FE" }}>{activeChatContact.name}</div>
-            <div style={{ fontSize:12, color:"#1E88E5", marginTop:2 }}>Nouvelle conversation · Tap pour ouvrir</div>
-          </div>
-        </div>
-      )}
-
-      {DEFAULT_CONTACTS.map(c => {
+            {/* ✅ Fusionner contacts fictifs + vraies conversations */ }
+      {(() => {
+        const realNames = Object.keys(localMsgs).filter(n => n && !DEFAULT_CONTACTS.find(d => d.name === n));
+        const realContacts = realNames.map(n => ({ name:n, online:true, initials:n.split(" ").map(w=>w[0]).join("").slice(0,2) }));
+        const allContacts = [...DEFAULT_CONTACTS, ...realContacts];
+        return allContacts.map(c => {
         const allMsgs = getMsgs(c.name);
         const last    = allMsgs[allMsgs.length-1];
         const unread  = allMsgs.filter(m => !m.isMe && !m.read).length;
@@ -1549,7 +1519,9 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
             </div>
           </div>
         );
-      })}
+        });
+      })()
+      }
     </>
   );
 
