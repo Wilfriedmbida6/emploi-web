@@ -265,7 +265,6 @@ export default function App() {
   const [rSkills, setRSkills] = useState([]);
 
   const unread      = notifs.filter(n => !n.read).length;
-  const unreadMsgs  = Object.values(chatMsgs||{}).flat().filter(m => !m.isMe && !m.read).length;
   const adminUnread = screen==="admin" ? (adminNotifs||[]).filter(n=>!n.read).length : 0;
 
   const toast$ = (msg, err=false) => {
@@ -790,7 +789,7 @@ export default function App() {
     { id:"home",        icon:"🏠", label:"Accueil" },
     { id:"jobs",        icon:"💼", label:"Offres" },
     { id:"techniciens", icon:"🔧", label:"Techs" },
-    { id:"chat",        icon:"💬", label:"Chat", badge:unreadMsgs },
+    { id:"chat",        icon:"💬", label:"Chat" },
     { id:"profile",     icon:"👤", label:"Profil" },
   ];
   return (
@@ -1346,20 +1345,11 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
     setChatStatus(s => ({ ...s, [msgId]: "sent" }));
 
     const sock = appSocketRef?.current;
-    const doSend = (s) => s.emit("message", { to: contactName?.trim(), text, msgId });
-
     if (sock?.connected) {
-      doSend(sock);
+      sock.emit("message", { to: contactName, text, msgId });
       console.log("📤 Message envoyé à", contactName);
-    } else if (sock) {
-      // ✅ Attendre la connexion puis envoyer
-      console.warn("⏳ Socket pas encore connecté, attente...");
-      sock.once("connect", () => {
-        doSend(sock);
-        console.log("📤 Message envoyé après reconnexion à", contactName);
-      });
     } else {
-      console.warn("⚠️ Pas de socket");
+      console.warn("⚠️ Socket non connecté", sock);
     }
   };
 
@@ -1451,21 +1441,10 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
     const base = name === "Mamadou Diallo" ? msgs.map(m => ({ ...m, status:m.isMe?"read":undefined })) : [];
     return [...base, ...(localMsgs[name]||[])];
   };
-  const markRead = (name) => {
-    setLocalMsgs(prev => {
-      const updated = (prev[name]||[]).map(m => ({ ...m, read: true }));
-      const next = { ...prev, [name]: updated };
-      try { localStorage.setItem('ept_msgs', JSON.stringify(next)); } catch{}
-      return next;
-    });
-  };
 
   // ── LISTE DES CONVERSATIONS ────────────────────────────────
   const realNames = Object.keys(localMsgs).filter(n => n && !DEFAULT_CONTACTS.find(d => d.name === n));
   const allContacts = [...DEFAULT_CONTACTS, ...realNames.map(n => ({ name:n, online:true, initials:n.split(" ").map(w=>w[0]).join("").slice(0,2) }))];
-
-  // ✅ Hook avant tout return conditionnel
-  useEffect(() => { if (activeC) markRead(activeC.name); }, [activeC?.name]);
 
   if (!activeC) return (
     <>
