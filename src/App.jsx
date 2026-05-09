@@ -123,13 +123,39 @@ const ADMIN_PASS  = "Admin@2025!";
 // ══════════════════════════════════════════════════════════════
 //  DONNÉES DE DÉMONSTRATION
 // ══════════════════════════════════════════════════════════════
-const mockUsers = [];
-const mockJobs = [];
+const mockUsers = [
+  { id:1, name:"Mamadou Diallo",  role:"technicien", avatar:"MD", city:"Dakar",   rating:4.8, exp:7,  skills:["Plomberie","Électricité"], status:"active", joined:"2025-01-10", jobs:34, online:true },
+  { id:2, name:"Fatou Ndiaye",    role:"technicien", avatar:"FN", city:"Abidjan", rating:4.5, exp:3,  skills:["Peinture","Carrelage"],    status:"active", joined:"2025-02-15", jobs:18, online:false },
+  { id:3, name:"Kofi Atta",       role:"technicien", avatar:"KA", city:"Accra",   rating:4.9, exp:12, skills:["Menuiserie","Soudure"],    status:"active", joined:"2024-11-01", jobs:87, online:true },
+  { id:4, name:"Aminata Touré",   role:"client",     avatar:"AT", city:"Conakry", rating:4.2, exp:0,  skills:[],                          status:"active", joined:"2025-03-05", jobs:0,  online:true },
+  { id:5, name:"Ibrahima Sow",    role:"technicien", avatar:"IS", city:"Bamako",  rating:3.9, exp:5,  skills:["Climatisation"],           status:"muted",  joined:"2025-01-22", jobs:21, online:false },
+  { id:6, name:"Aïcha Coulibaly", role:"client",     avatar:"AC", city:"Lomé",    rating:4.6, exp:0,  skills:[],                          status:"active", joined:"2025-04-01", jobs:0,  online:true },
+];
+const mockJobs = [
+  { id:1, title:"Réparation fuite d'eau urgente",   category:"Plomberie",    city:"Dakar",   budget:"15 000 FCFA",  urgent:true,  postedBy:"Aminata Touré",   date:"2025-04-29", status:"open",   applicants:3 },
+  { id:2, title:"Installation panneau solaire 5kW", category:"Électricité",  city:"Abidjan", budget:"450 000 FCFA", urgent:false, postedBy:"Aïcha Coulibaly", date:"2025-04-28", status:"open",   applicants:7 },
+  { id:3, title:"Peinture appartement F4",          category:"Peinture",     city:"Accra",   budget:"80 000 FCFA",  urgent:false, postedBy:"Aminata Touré",   date:"2025-04-27", status:"closed", applicants:12 },
+  { id:4, title:"Climatisation bureau 3 pièces",    category:"Climatisation",city:"Bamako",  budget:"120 000 FCFA", urgent:true,  postedBy:"Aïcha Coulibaly", date:"2025-04-29", status:"open",   applicants:2 },
+  { id:5, title:"Carrelage cuisine + bain",         category:"Carrelage",    city:"Lomé",    budget:"95 000 FCFA",  urgent:false, postedBy:"Aminata Touré",   date:"2025-04-26", status:"open",   applicants:5 },
+];
 // Notifs admin (new_user, report = admin seulement)
-const mockAdminNotifs = [];
+const mockAdminNotifs = [
+  { id:1, type:"new_user",    msg:"Nouveau membre : Aïcha Coulibaly",      time:"Il y a 2h", read:false },
+  { id:2, type:"new_job",     msg:"Nouvelle offre : Installation solaire", time:"Il y a 3h", read:false },
+  { id:3, type:"report",      msg:"Signalement sur Ibrahima Sow",          time:"Il y a 5h", read:false },
+  { id:4, type:"new_user",    msg:"Nouveau membre : Kofi Atta",            time:"Il y a 1j", read:true  },
+];
 // Notifs utilisateur (messages, offres, candidatures — PAS new_user ni report)
-const mockNotifs = [];
-const mockMessages = [];
+const mockNotifs = [
+  { id:2, type:"new_job",     msg:"Nouvelle offre : Installation solaire", time:"Il y a 3h", read:false },
+  { id:5, type:"message",     msg:"Nouveau message de Mamadou Diallo",     time:"Il y a 1j", read:true, from:"Mamadou Diallo" },
+  { id:6, type:"application", msg:"Candidature reçue pour votre offre",   time:"Il y a 2j", read:true  },
+];
+const mockMessages = [
+  { id:1, from:"Mamadou Diallo", text:"Bonjour ! J'ai un problème avec mon profil.", time:"10:30", isMe:false },
+  { id:2, from:"Moi",            text:"Bonjour, quel est le problème exactement ?",  time:"10:32", isMe:true  },
+  { id:3, from:"Mamadou Diallo", text:"Je n'arrive pas à uploader mon CV.",           time:"10:33", isMe:false },
+];
 const CATEGORIES = [
   "Plomberie","Électricité","Peinture","Menuiserie","Carrelage",
   "Climatisation","Soudure","Jardinage","Nettoyage","Sécurité",
@@ -215,12 +241,16 @@ export default function App() {
   const chatRef = useRef(null);
 
   // Data
-  const [users, setUsers]   = useState([]);
-  const [jobs, setJobs]     = useState([]);
-  const [notifs, setNotifs] = useState([]);
-  const [adminNotifs, setAdminNotifs] = useState([]);
-  const [msgs, setMsgs]     = useState([]);
+  const [users, setUsers]   = useState(mockUsers);
+  const [jobs, setJobs]     = useState(mockJobs);
+  const [notifs, setNotifs] = useState(mockNotifs);         // notifs utilisateur
+  const [adminNotifs, setAdminNotifs] = useState(mockAdminNotifs); // notifs admin seulement
+  const [msgs, setMsgs]     = useState(mockMessages);
   const [jobForm, setJobForm] = useState({ title:"", category:"", city:"", budget:"", urgent:false });
+  // États chat globaux (persistent quand on change d'onglet)
+  const [chatMsgs, setChatMsgs]       = useState(() => { try { return JSON.parse(localStorage.getItem('ept_msgs')||'{}'); } catch{return {};} });
+  const [chatTyping, setChatTyping]   = useState({});
+  const [chatStatus, setChatStatus]   = useState({});
 
   // Form fields
   const [email, setEmail]   = useState("");
@@ -330,44 +360,29 @@ export default function App() {
     socket.on("user_online", ({ name, online }) => {
       setUsers(u => u.map(x => x.name === name ? { ...x, online } : x));
     });
-
-    // ✅ BUG 1 CORRIGÉ — Réception messages en temps réel
-    socket.on("message", (payload) => {
-      setMsgs(m => {
-        // Éviter les doublons
-        if (m.find(x => x.id === payload.id)) return m;
-        return [...m, {
-          id:    payload.id,
-          from:  payload.from,
-          text:  payload.text,
-          time:  payload.time || new Date().toLocaleTimeString("fr",{hour:"2-digit",minute:"2-digit"}),
-          isMe:  false,
-          isVoice: payload.isVoice || false,
-          voiceUrl: payload.voiceUrl,
-          voiceDur: payload.voiceDur,
-        }];
-      });
-    });
-
-    // ✅ BUG 1b — Réception nouvelles offres en temps réel
-    socket.on("new_job", (job) => {
-      setJobs(prev => {
-        if (prev.find(j => j.id === job.id)) return prev;
-        return [{ ...job, postedBy: job.posted_by || job.postedBy }, ...prev];
-      });
-      setNotifs(n => [{
-        id: Date.now(), type:"new_job",
-        msg: `💼 Nouvelle offre : ${job.title}`,
-        time:"À l'instant", read:false,
-      }, ...n]);
-    });
-
     socket.on("notification", (notif) => {
       setNotifs(n => [{ ...notif, id: Date.now(), read: false }, ...n]);
     });
-
-    return () => socket.disconnect();
-  }, [currentUser]);
+    socket.on("message", (m) => {
+      setChatMsgs(prev => {
+        const next = { ...prev, [m.from]: [...(prev[m.from]||[]), { ...m, isMe:false }] };
+        try { localStorage.setItem('ept_msgs', JSON.stringify(next)); } catch{}
+        return next;
+      });
+    });
+    socket.on("msg_status", ({ msgId, status }) => {
+      setChatStatus(s => ({ ...s, [msgId]: status }));
+    });
+    socket.on("typing", ({ from, typing }) => {
+      setChatTyping(t => ({ ...t, [from]: typing }));
+      if (typing) setTimeout(() => setChatTyping(t => ({ ...t, [from]: false })), 3000);
+    });
+    return () => {
+      // Ne pas déconnecter — garder le socket vivant entre les onglets
+      // Seulement déconnecter si l'utilisateur se déconnecte (currentUser devient null)
+      if (!currentUser) socket.disconnect();
+    };
+  }, [currentUser?.id]);  // ✅ Seulement quand l'ID change, pas à chaque re-render
 
   // ─── OPEN PROFILE ─────────────────────────────────────────────
   const openProfile = (userName) => {
@@ -552,20 +567,9 @@ export default function App() {
 
     // Mettre à jour le nb de candidats
     setJobs(jj => jj.map(j => j.id===job.id ? { ...j, applicants:(j.applicants||0)+1 } : j));
-    // ✅ BUG 3 CORRIGÉ — ouvrir le chat D'ABORD, puis émettre le message
-    // avec le bon destinataire (dest) explicitement
+    // Ouvrir le chat avec le propriétaire et envoyer le message
+    sendMsg(msgText);
     openChat(dest, true);
-    setTimeout(() => {
-      if (socketRef.current?.connected) {
-        const msgId = Date.now();
-        socketRef.current.emit("message", { to: dest, text: msgText, msgId });
-      }
-      setMsgs(m => [...m, {
-        id: Date.now(), from:"Moi", text: msgText,
-        time: new Date().toLocaleTimeString("fr",{hour:"2-digit",minute:"2-digit"}),
-        isMe: true,
-      }]);
-    }, 100);
     toast$("Candidature envoyée et message transmis ! ✓");
   };
 
@@ -582,28 +586,14 @@ export default function App() {
       applicants: 0,
     };
     // Sauvegarder dans Supabase
-    let finalJob;
     try {
       const saved = await sb.insert("jobs", newJob, authToken);
-      finalJob = Array.isArray(saved) ? saved[0] : null;
-    } catch(e) { finalJob = null; }
-
-    // Construire l'objet job final avec un id stable
-    const jobWithId = {
-      ...newJob,
-      id:       finalJob?.id       || Date.now(),
-      postedBy: finalJob?.posted_by || authorName,
-      posted_by: authorName,
-    };
-
-    // Ajouter localement
-    setJobs(j => [jobWithId, ...j]);
-
-    // ✅ BUG 2 CORRIGÉ — Broadcaster à tous les clients connectés
-    if (socketRef.current?.connected) {
-      socketRef.current.emit("new_job", jobWithId);
+      const job = Array.isArray(saved) ? saved[0] : { ...newJob, id: Date.now(), postedBy: authorName };
+      setJobs(j => [{ ...job, postedBy: job.posted_by || authorName }, ...j]);
+    } catch(e) {
+      // Fallback local si erreur
+      setJobs(j => [{ id:Date.now(), ...newJob, postedBy: authorName }, ...j]);
     }
-
     setJobForm({ title:"",category:"",city:"",budget:"",urgent:false });
     setShowJob(false); toast$("Offre publiée ! ✅");
   };
@@ -795,19 +785,11 @@ export default function App() {
   // ══════════════════════════════════════════════════════════════
   //  UTILISATEUR
   // ══════════════════════════════════════════════════════════════
-  // ✅ FIX 5 — Badge chat = nb messages non lus depuis localStorage
-  const chatUnread = (() => {
-    try {
-      const stored = JSON.parse(localStorage.getItem("ept_msgs") || "{}");
-      return Object.values(stored).flat().filter(m => !m.isMe && !m.read).length;
-    } catch { return 0; }
-  })();
-
   const userTabs = [
     { id:"home",        icon:"🏠", label:"Accueil" },
     { id:"jobs",        icon:"💼", label:"Offres" },
     { id:"techniciens", icon:"🔧", label:"Techs" },
-    { id:"chat",        icon:"💬", label:"Chat",  badge: chatUnread },
+    { id:"chat",        icon:"💬", label:"Chat" },
     { id:"profile",     icon:"👤", label:"Profil" },
   ];
   return (
@@ -830,7 +812,7 @@ export default function App() {
         {tab==="home"        && <HomeTab users={users} jobs={jobs} setTab={setTab} toast$={toast$} openChat={openChat} handlePostuler={handlePostuler} setOnlineFilter={setOnlineFilter} openProfile={openProfile} />}
         {tab==="jobs"        && <JobsTab jobs={jobs} setJobs={setJobs} showJob={showJob} setShowJob={setShowJob} jobForm={jobForm} setJobForm={setJobForm} postJob={postJob} toast$={toast$} currentUser={currentUser} setTab={setTab} openChat={openChat} handlePostuler={handlePostuler} highlightJob={highlightJob} prevTab={prevTab} openProfile={openProfile} />}
         {tab==="techniciens" && <TechsTab users={filteredUsers(users.filter(u=>u.role==="technicien" && (!onlineFilter || u.online)))} searchQ={searchQ} setSearchQ={setSearchQ} selUser={selUser} setSelUser={setSelUser} setTab={setTab} toast$={toast$} myRatings={myRatings} setMyRatings={setMyRatings} openChat={openChat} onlineFilter={onlineFilter} setOnlineFilter={setOnlineFilter} viewProfileUser={viewProfileUser} setViewProfileUser={setViewProfileUser} />}
-        {tab==="chat"        && <ChatTab msgs={msgs} setMsgs={setMsgs} newMsg={newMsg} setNewMsg={setNewMsg} sendMsg={sendMsg} chatRef={chatRef} voiceOn={voiceOn} setVoiceOn={setVoiceOn} activeChatContact={activeChatContact} setActiveChatContact={setActiveChatContact} setTab={setTab} prevTab={prevTab} currentUser={currentUser} />}
+        {tab==="chat"        && <ChatTab msgs={msgs} setMsgs={setMsgs} newMsg={newMsg} setNewMsg={setNewMsg} sendMsg={sendMsg} chatRef={chatRef} voiceOn={voiceOn} setVoiceOn={setVoiceOn} activeChatContact={activeChatContact} setActiveChatContact={setActiveChatContact} setTab={setTab} prevTab={prevTab} currentUser={currentUser} appSocketRef={socketRef} chatMsgs={chatMsgs} setChatMsgs={setChatMsgs} chatTyping={chatTyping} chatStatus={chatStatus} setChatStatus={setChatStatus} />}
         {tab==="profile"     && <ProfileTab currentUser={currentUser} doLogout={doLogout} toast$={toast$} openChat={openChat} setTab={setTab} />}
         {tab==="notifs"      && <NotifsTab notifs={notifs} setNotifs={setNotifs} unread={unread} setTab={setTab} openChat={openChat} setHighlightJob={setHighlightJob} />}
       </div>
@@ -1301,14 +1283,18 @@ function NotifsTab({ notifs, setNotifs, unread, setTab, openChat, setHighlightJo
 }
 
 const DEFAULT_CONTACTS = [
-  { name:"Support EPT", online:true, initials:"SE", color:"#C62828" },
+  { name:"Support EPT",    online:true,  initials:"SE", color:"#C62828" },
+  { name:"Mamadou Diallo", online:true,  initials:"MD", color:"#1565C0" },
+  { name:"Kofi Atta",      online:false, initials:"KA", color:"#6A1B9A" },
 ];
 
-function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, setVoiceOn, activeChatContact, setActiveChatContact, setTab, prevTab, currentUser }) {
+function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, setVoiceOn, activeChatContact, setActiveChatContact, setTab, prevTab, currentUser, appSocketRef, chatMsgs, setChatMsgs, chatTyping, chatStatus, setChatStatus }) {
   const [activeC, setActiveC]               = useState(null);
-  const [localMsgs, setLocalMsgs]           = useState(() => { try { return JSON.parse(localStorage.getItem('ept_msgs')||'{}'); } catch{return {};} });
-  const [typingContacts, setTypingContacts] = useState({});
-  const [msgStatus, setMsgStatus]           = useState({});
+  // Utiliser les états globaux du App root
+  const localMsgs    = chatMsgs   || {};
+  const setLocalMsgs = setChatMsgs;
+  const typingContacts = chatTyping || {};
+  const msgStatus    = chatStatus  || {};
   const [socketReady, setSocketReady]       = useState(false);
   const [selectedMsg, setSelectedMsg]       = useState(null); // menu contextuel long-press
 
@@ -1323,7 +1309,6 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
   const voiceTimerRef = useRef(null);
   const audioPreviewRef = useRef(null);
 
-  const socketRef     = useRef(null);
   const timerRef      = useRef(null);
   const typingTimer   = useRef(null);
   const chatBottomRef = useRef(null);
@@ -1331,71 +1316,20 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
   const myName = currentUser?.name || "Moi";
   const fmtSecs = (s) => `${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
 
-  // ── Init Socket.io ─────────────────────────────────────────
+  // ── Socket status depuis App root ──
   useEffect(() => {
-    // Charger socket.io-client depuis CDN
-    const loadSocket = () => {
-      const socket = window.io(SERVER_URL, {
-        transports: ["websocket", "polling"],
-        auth: { userId: currentUser?.id || "guest", name: myName },
-      });
-      socketRef.current = socket;
-
-      socket.on("connect",    () => { setSocketReady(true);  console.log("🟢 Socket connecté"); });
-      socket.on("disconnect", () => { setSocketReady(false); console.log("🔴 Socket déconnecté"); });
-
-      // Message entrant
-      socket.on("message", (m) => {
-        setLocalMsgs(prev => {
-          // ✅ FIX 7 — message marqué non lu par défaut pour le badge
-          const isOpen = activeC?.name === m.from;
-          const newMsg = { ...m, isMe: false, read: isOpen };
-          const next = { ...prev, [m.from]: [...(prev[m.from]||[]), newMsg] };
-          try { localStorage.setItem("ept_msgs", JSON.stringify(next)); } catch{}
-          return next;
-        });
-        // Marquer comme "read" si on est dans cette conv
-        setActiveC(cur => {
-          if (cur?.name === m.from) {
-            socket.emit("msg_status", { msgId: m.id, status: "read", to: m.from });
-          }
-          return cur;
-        });
-      });
-
-      // Mise à jour statut (delivered / read)
-      socket.on("msg_status", ({ msgId, status }) => {
-        setMsgStatus(s => ({ ...s, [msgId]: status }));
-      });
-
-      // Indicateur frappe
-      socket.on("typing", ({ from, typing }) => {
-        setTypingContacts(t => ({ ...t, [from]: typing }));
-        if (typing) {
-          clearTimeout(typingTimer.current);
-          typingTimer.current = setTimeout(() =>
-            setTypingContacts(t => ({ ...t, [from]: false })), 3000);
-        }
-      });
-
-      // Statut en ligne
-      socket.on("user_online", ({ name, online }) => {
-        // On pourrait mettre à jour la liste des contacts ici
-      });
+    const socket = appSocketRef?.current;
+    if (!socket) return;
+    setSocketReady(socket.connected);
+    const onConnect    = () => setSocketReady(true);
+    const onDisconnect = () => setSocketReady(false);
+    socket.on("connect",    onConnect);
+    socket.on("disconnect", onDisconnect);
+    return () => {
+      socket.off("connect",    onConnect);
+      socket.off("disconnect", onDisconnect);
     };
-
-    if (window.io) { loadSocket(); }
-    else {
-      const s = document.createElement("script");
-      s.src = "https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.5/socket.io.min.js";
-      s.onload = loadSocket;
-      document.head.appendChild(s);
-    }
-
-    // ✅ FIX 4 — NE PAS déconnecter en quittant l'onglet chat
-    // Le socket reste vivant tant que l'utilisateur est connecté
-    return () => {};
-  }, []);
+  }, [appSocketRef?.current]);
 
   // ── Envoi message texte ────────────────────────────────────
   const addMsg = (contactName, text) => {
@@ -1410,38 +1344,24 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
     });
     setMsgStatus(s => ({ ...s, [msgId]: "sent" }));
 
-    if (socketReady) {
-      // Envoi réel via Socket.io
-      socketRef.current.emit("message", { to:contactName, text, msgId });
-    } else {
-      // Mode démo hors ligne
-      // Mode hors ligne — statut simulé
-      setTimeout(() => setMsgStatus(s => ({ ...s, [msgId]: "delivered" })), 600);
+    const sock = appSocketRef?.current;
+    if (sock?.connected) {
+      sock.emit("message", { to: contactName, text, msgId });
     }
   };
 
   // ── Indicateur frappe sortant ──────────────────────────────
   const onTyping = () => {
-    if (!socketReady || !activeC) return;
-    socketRef.current.emit("typing", { to: activeC.name, typing: true });
+    const sock = appSocketRef?.current;
+    if (!sock?.connected || !activeC) return;
+    sock.emit("typing", { to: activeC.name, typing: true });
     clearTimeout(typingTimer.current);
-    typingTimer.current = setTimeout(() =>
-      socketRef.current?.emit("typing", { to: activeC.name, typing: false }), 2000);
+    typingTimer.current = setTimeout(() => sock?.emit("typing", { to: activeC.name, typing: false }), 2000);
   };
 
   // ── Marquer comme lu en ouvrant la conv ───────────────────
   useEffect(() => {
-    if (!activeC) return;
-    // ✅ FIX 6 — Marquer tous les messages de cette conv comme lus
-    setLocalMsgs(prev => {
-      const convMsgs = (prev[activeC.name] || []).map(m =>
-        (!m.isMe && !m.read) ? { ...m, read: true } : m
-      );
-      const next = { ...prev, [activeC.name]: convMsgs };
-      try { localStorage.setItem("ept_msgs", JSON.stringify(next)); } catch {}
-      return next;
-    });
-    if (socketReady) {
+    if (activeC && socketReady) {
       getMsgs(activeC.name).filter(m => !m.isMe && m.id).forEach(m =>
         socketRef.current.emit("msg_status", { msgId:m.id, status:"read", to:activeC.name })
       );
@@ -1515,8 +1435,8 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
   useEffect(() => { chatBottomRef.current?.scrollIntoView({ behavior:"smooth" }); }, [localMsgs, activeC]);
 
   const getMsgs = (name) => {
-    // Uniquement les vrais messages reçus/envoyés via socket
-    return localMsgs[name] || [];
+    const base = name === "Mamadou Diallo" ? msgs.map(m => ({ ...m, status:m.isMe?"read":undefined })) : [];
+    return [...base, ...(localMsgs[name]||[])];
   };
 
   // ── LISTE DES CONVERSATIONS ────────────────────────────────
