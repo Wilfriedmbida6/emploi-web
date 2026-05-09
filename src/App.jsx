@@ -1304,7 +1304,6 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
   const voiceTimerRef = useRef(null);
   const audioPreviewRef = useRef(null);
 
-  const socketRef     = useRef(null);
   const timerRef      = useRef(null);
   const typingTimer   = useRef(null);
   const chatBottomRef = useRef(null);
