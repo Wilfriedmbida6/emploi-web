@@ -1347,16 +1347,14 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
 
     const sock = appSocketRef?.current;
     // ✅ Sauvegarder dans Supabase
-    const myName = (currentUser?.name || currentUser?.email)?.trim();
-    fetch(`${SUPABASE_URL}/rest/v1/messages`, {
-      method: "POST",
-      headers: { ...sb.headers(authToken), "Prefer": "return=minimal" },
-      body: JSON.stringify({
-        content: text,
-        sender_name: myName,
-        receiver_name: contactName?.trim(),
-      })
-    }).catch(e => console.error("save msg", e));
+    const senderName = (currentUser?.name || currentUser?.email)?.trim();
+    if (authToken) {
+      fetch(`${SUPABASE_URL}/rest/v1/messages`, {
+        method: "POST",
+        headers: { ...sb.headers(authToken), "Prefer": "return=minimal" },
+        body: JSON.stringify({ content: text, sender_name: senderName, receiver_name: contactName?.trim() })
+      }).catch(e => console.error("save msg", e));
+    }
 
     const doSend = (s) => s.emit("message", { to: contactName?.trim(), text, msgId });
 
