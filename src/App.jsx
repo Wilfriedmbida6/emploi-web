@@ -265,6 +265,7 @@ export default function App() {
   const [rSkills, setRSkills] = useState([]);
 
   const unread      = notifs.filter(n => !n.read).length;
+  const unreadMsgs  = Object.values(chatMsgs||{}).flat().filter(m => !m.isMe && !m.read).length;
   const adminUnread = screen==="admin" ? (adminNotifs||[]).filter(n=>!n.read).length : 0;
 
   const toast$ = (msg, err=false) => {
@@ -789,7 +790,7 @@ export default function App() {
     { id:"home",        icon:"🏠", label:"Accueil" },
     { id:"jobs",        icon:"💼", label:"Offres" },
     { id:"techniciens", icon:"🔧", label:"Techs" },
-    { id:"chat",        icon:"💬", label:"Chat" },
+    { id:"chat",        icon:"💬", label:"Chat", badge:unreadMsgs },
     { id:"profile",     icon:"👤", label:"Profil" },
   ];
   return (
@@ -1345,11 +1346,32 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
     setChatStatus(s => ({ ...s, [msgId]: "sent" }));
 
     const sock = appSocketRef?.current;
+    // ✅ Sauvegarder dans Supabase
+    const myName = (currentUser?.name || currentUser?.email)?.trim();
+    fetch(`${SUPABASE_URL}/rest/v1/messages`, {
+      method: "POST",
+      headers: { ...sb.headers(authToken), "Prefer": "return=minimal" },
+      body: JSON.stringify({
+        content: text,
+        sender_name: myName,
+        receiver_name: contactName?.trim(),
+      })
+    }).catch(e => console.error("save msg", e));
+
+    const doSend = (s) => s.emit("message", { to: contactName?.trim(), text, msgId });
+
     if (sock?.connected) {
-      sock.emit("message", { to: contactName, text, msgId });
+      doSend(sock);
       console.log("📤 Message envoyé à", contactName);
+    } else if (sock) {
+      // ✅ Attendre la connexion puis envoyer
+      console.warn("⏳ Socket pas encore connecté, attente...");
+      sock.once("connect", () => {
+        doSend(sock);
+        console.log("📤 Message envoyé après reconnexion à", contactName);
+      });
     } else {
-      console.warn("⚠️ Socket non connecté", sock);
+      console.warn("⚠️ Pas de socket");
     }
   };
 
@@ -1442,9 +1464,52 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
     return [...base, ...(localMsgs[name]||[])];
   };
 
+  // ✅ Charger messages depuis Supabase à l'ouverture d'une conv
+  const loadMsgsFromDB = async (contactName) => {
+    if (!authToken || !currentUser) return;
+    try {
+      const myName = (currentUser.name || currentUser.email)?.trim();
+      const filter = `&or=(and(sender_name.eq.${encodeURIComponent(myName)},receiver_name.eq.${encodeURIComponent(contactName)}),and(sender_name.eq.${encodeURIComponent(contactName)},receiver_name.eq.${encodeURIComponent(myName)}))`;
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/messages?select=id,content,sender_name,receiver_name,created_at&order=created_at.asc${filter}`, {
+        headers: sb.headers(authToken)
+      });
+      const data = await r.json();
+      if (!Array.isArray(data)) return;
+      const formatted = data.map(m => ({
+        id: m.id,
+        from: m.sender_name,
+        text: m.content,
+        time: new Date(m.created_at).toLocaleTimeString("fr", {hour:"2-digit", minute:"2-digit"}),
+        isMe: m.sender_name?.trim() === myName?.trim(),
+        read: true,
+      }));
+      setLocalMsgs(prev => {
+        const next = { ...prev, [contactName]: formatted };
+        try { localStorage.setItem('ept_msgs', JSON.stringify(next)); } catch{}
+        return next;
+      });
+    } catch(e) { console.error("loadMsgsFromDB", e); }
+  };
+  const markRead = (name) => {
+    setLocalMsgs(prev => {
+      const updated = (prev[name]||[]).map(m => ({ ...m, read: true }));
+      const next = { ...prev, [name]: updated };
+      try { localStorage.setItem('ept_msgs', JSON.stringify(next)); } catch{}
+      return next;
+    });
+  };
+
   // ── LISTE DES CONVERSATIONS ────────────────────────────────
   const realNames = Object.keys(localMsgs).filter(n => n && !DEFAULT_CONTACTS.find(d => d.name === n));
   const allContacts = [...DEFAULT_CONTACTS, ...realNames.map(n => ({ name:n, online:true, initials:n.split(" ").map(w=>w[0]).join("").slice(0,2) }))];
+
+  // ✅ Hook avant tout return conditionnel
+  useEffect(() => {
+    if (activeC) {
+      markRead(activeC.name);
+      loadMsgsFromDB(activeC.name); // ✅ Charger depuis Supabase
+    }
+  }, [activeC?.name]);
 
   if (!activeC) return (
     <>
