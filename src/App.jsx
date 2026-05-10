@@ -812,8 +812,8 @@ export default function App() {
       <div style={css.page}>
         {tab==="home"        && <HomeTab users={users} jobs={jobs} setTab={setTab} toast$={toast$} openChat={openChat} handlePostuler={handlePostuler} setOnlineFilter={setOnlineFilter} openProfile={openProfile} />}
         {tab==="jobs"        && <JobsTab jobs={jobs} setJobs={setJobs} showJob={showJob} setShowJob={setShowJob} jobForm={jobForm} setJobForm={setJobForm} postJob={postJob} toast$={toast$} currentUser={currentUser} setTab={setTab} openChat={openChat} handlePostuler={handlePostuler} highlightJob={highlightJob} prevTab={prevTab} openProfile={openProfile} />}
-        {tab==="techniciens" && <TechsTab users={filteredUsers(users.filter(u=>u.role==="technicien" && (!onlineFilter || u.online)))} searchQ={searchQ} setSearchQ={setSearchQ} selUser={selUser} setSelUser={setSelUser} setTab={setTab} toast$={toast$} myRatings={myRatings} setMyRatings={setMyRatings} openChat={openChat} onlineFilter={onlineFilter} setOnlineFilter={setOnlineFilter} viewProfileUser={viewProfileUser} setViewProfileUser={setViewProfileUser} />}
-        {tab==="chat"        && <ChatTab msgs={msgs} setMsgs={setMsgs} newMsg={newMsg} setNewMsg={setNewMsg} sendMsg={sendMsg} chatRef={chatRef} voiceOn={voiceOn} setVoiceOn={setVoiceOn} activeChatContact={activeChatContact} setActiveChatContact={setActiveChatContact} setTab={setTab} prevTab={prevTab} currentUser={currentUser} appSocketRef={socketRef} chatMsgs={chatMsgs} setChatMsgs={setChatMsgs} chatTyping={chatTyping} chatStatus={chatStatus} setChatStatus={setChatStatus} />}
+        {tab==="techniciens" && <TechsTab users={filteredUsers(users.filter(u=>u.role==="technicien" && (!onlineFilter || u.online) && u.name?.trim() !== (currentUser?.name||currentUser?.email)?.trim()))} searchQ={searchQ} setSearchQ={setSearchQ} selUser={selUser} setSelUser={setSelUser} setTab={setTab} toast$={toast$} myRatings={myRatings} setMyRatings={setMyRatings} openChat={openChat} onlineFilter={onlineFilter} setOnlineFilter={setOnlineFilter} viewProfileUser={viewProfileUser} setViewProfileUser={setViewProfileUser} />}
+        {tab==="chat"        && <ChatTab msgs={msgs} setMsgs={setMsgs} newMsg={newMsg} setNewMsg={setNewMsg} sendMsg={sendMsg} chatRef={chatRef} voiceOn={voiceOn} setVoiceOn={setVoiceOn} activeChatContact={activeChatContact} setActiveChatContact={setActiveChatContact} setTab={setTab} prevTab={prevTab} currentUser={currentUser} appSocketRef={socketRef} chatMsgs={chatMsgs} setChatMsgs={setChatMsgs} chatTyping={chatTyping} chatStatus={chatStatus} setChatStatus={setChatStatus} authToken={authToken} />}
         {tab==="profile"     && <ProfileTab currentUser={currentUser} doLogout={doLogout} toast$={toast$} openChat={openChat} setTab={setTab} />}
         {tab==="notifs"      && <NotifsTab notifs={notifs} setNotifs={setNotifs} unread={unread} setTab={setTab} openChat={openChat} setHighlightJob={setHighlightJob} />}
       </div>
@@ -1002,7 +1002,7 @@ function HomeTab({ users, jobs, setTab, toast$, openChat, handlePostuler, setOnl
       {[
         { l:"Prestataires", v:users.filter(u=>u.role==="technicien").length, i:"🔧", t:"techniciens", filter:false },
         { l:"Offres actives",v:jobs.filter(j=>j.status==="open").length,     i:"💼", t:"jobs",        filter:false },
-        { l:"En ligne",      v:users.filter(u=>u.role==="technicien"&&u.online).length, i:"🟢", t:"techniciens", filter:true  },
+        { l:"En ligne",      v:users.filter(u=>u.role==="technicien"&&u.online&&u.name?.trim()!==(currentUser?.name||currentUser?.email)?.trim()).length, i:"🟢", t:"techniciens", filter:true  },
       ].map(s=>(
         <div key={s.l} onClick={()=>{ setOnlineFilter?.(s.filter); setTab(s.t); }}
           style={{ background:"#122236", borderRadius:16, border:"1px solid #1e3a52", padding:"14px 8px", marginBottom:0, textAlign:"center", cursor:"pointer" }}>
@@ -1289,7 +1289,7 @@ const DEFAULT_CONTACTS = [
   { name:"Kofi Atta",      online:false, initials:"KA", color:"#6A1B9A" },
 ];
 
-function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, setVoiceOn, activeChatContact, setActiveChatContact, setTab, prevTab, currentUser, appSocketRef, chatMsgs, setChatMsgs, chatTyping, chatStatus, setChatStatus }) {
+function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, setVoiceOn, activeChatContact, setActiveChatContact, setTab, prevTab, currentUser, appSocketRef, chatMsgs, setChatMsgs, chatTyping, chatStatus, setChatStatus, authToken }) {
   const [activeC, setActiveC]               = useState(null);
   // Utiliser les états globaux du App root
   const localMsgs    = chatMsgs   || {};
