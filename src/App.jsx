@@ -265,7 +265,6 @@ export default function App() {
   const [rSkills, setRSkills] = useState([]);
 
   const unread      = notifs.filter(n => !n.read).length;
-  const unreadMsgs  = Object.values(chatMsgs||{}).flat().filter(m => !m.isMe && !m.read).length;
   const adminUnread = screen==="admin" ? (adminNotifs||[]).filter(n=>!n.read).length : 0;
 
   const toast$ = (msg, err=false) => {
@@ -790,7 +789,7 @@ export default function App() {
     { id:"home",        icon:"🏠", label:"Accueil" },
     { id:"jobs",        icon:"💼", label:"Offres" },
     { id:"techniciens", icon:"🔧", label:"Techs" },
-    { id:"chat",        icon:"💬", label:"Chat", badge:unreadMsgs },
+    { id:"chat",        icon:"💬", label:"Chat" },
     { id:"profile",     icon:"👤", label:"Profil" },
   ];
   return (
@@ -812,8 +811,8 @@ export default function App() {
       <div style={css.page}>
         {tab==="home"        && <HomeTab users={users} jobs={jobs} setTab={setTab} toast$={toast$} openChat={openChat} handlePostuler={handlePostuler} setOnlineFilter={setOnlineFilter} openProfile={openProfile} />}
         {tab==="jobs"        && <JobsTab jobs={jobs} setJobs={setJobs} showJob={showJob} setShowJob={setShowJob} jobForm={jobForm} setJobForm={setJobForm} postJob={postJob} toast$={toast$} currentUser={currentUser} setTab={setTab} openChat={openChat} handlePostuler={handlePostuler} highlightJob={highlightJob} prevTab={prevTab} openProfile={openProfile} />}
-        {tab==="techniciens" && <TechsTab users={filteredUsers(users.filter(u=>u.role==="technicien" && (!onlineFilter || u.online) && u.name?.trim() !== (currentUser?.name||currentUser?.email)?.trim()))} searchQ={searchQ} setSearchQ={setSearchQ} selUser={selUser} setSelUser={setSelUser} setTab={setTab} toast$={toast$} myRatings={myRatings} setMyRatings={setMyRatings} openChat={openChat} onlineFilter={onlineFilter} setOnlineFilter={setOnlineFilter} viewProfileUser={viewProfileUser} setViewProfileUser={setViewProfileUser} />}
-        {tab==="chat"        && <ChatTab msgs={msgs} setMsgs={setMsgs} newMsg={newMsg} setNewMsg={setNewMsg} sendMsg={sendMsg} chatRef={chatRef} voiceOn={voiceOn} setVoiceOn={setVoiceOn} activeChatContact={activeChatContact} setActiveChatContact={setActiveChatContact} setTab={setTab} prevTab={prevTab} currentUser={currentUser} appSocketRef={socketRef} chatMsgs={chatMsgs} setChatMsgs={setChatMsgs} chatTyping={chatTyping} chatStatus={chatStatus} setChatStatus={setChatStatus} authToken={authToken} />}
+        {tab==="techniciens" && <TechsTab users={filteredUsers(users.filter(u=>u.role==="technicien" && (!onlineFilter || u.online)))} searchQ={searchQ} setSearchQ={setSearchQ} selUser={selUser} setSelUser={setSelUser} setTab={setTab} toast$={toast$} myRatings={myRatings} setMyRatings={setMyRatings} openChat={openChat} onlineFilter={onlineFilter} setOnlineFilter={setOnlineFilter} viewProfileUser={viewProfileUser} setViewProfileUser={setViewProfileUser} />}
+        {tab==="chat"        && <ChatTab msgs={msgs} setMsgs={setMsgs} newMsg={newMsg} setNewMsg={setNewMsg} sendMsg={sendMsg} chatRef={chatRef} voiceOn={voiceOn} setVoiceOn={setVoiceOn} activeChatContact={activeChatContact} setActiveChatContact={setActiveChatContact} setTab={setTab} prevTab={prevTab} currentUser={currentUser} appSocketRef={socketRef} chatMsgs={chatMsgs} setChatMsgs={setChatMsgs} chatTyping={chatTyping} chatStatus={chatStatus} setChatStatus={setChatStatus} />}
         {tab==="profile"     && <ProfileTab currentUser={currentUser} doLogout={doLogout} toast$={toast$} openChat={openChat} setTab={setTab} />}
         {tab==="notifs"      && <NotifsTab notifs={notifs} setNotifs={setNotifs} unread={unread} setTab={setTab} openChat={openChat} setHighlightJob={setHighlightJob} />}
       </div>
@@ -1002,7 +1001,7 @@ function HomeTab({ users, jobs, setTab, toast$, openChat, handlePostuler, setOnl
       {[
         { l:"Prestataires", v:users.filter(u=>u.role==="technicien").length, i:"🔧", t:"techniciens", filter:false },
         { l:"Offres actives",v:jobs.filter(j=>j.status==="open").length,     i:"💼", t:"jobs",        filter:false },
-        { l:"En ligne",      v:users.filter(u=>u.role==="technicien"&&u.online&&u.name?.trim()!==(currentUser?.name||currentUser?.email)?.trim()).length, i:"🟢", t:"techniciens", filter:true  },
+        { l:"En ligne",      v:users.filter(u=>u.role==="technicien"&&u.online).length, i:"🟢", t:"techniciens", filter:true  },
       ].map(s=>(
         <div key={s.l} onClick={()=>{ setOnlineFilter?.(s.filter); setTab(s.t); }}
           style={{ background:"#122236", borderRadius:16, border:"1px solid #1e3a52", padding:"14px 8px", marginBottom:0, textAlign:"center", cursor:"pointer" }}>
@@ -1289,7 +1288,7 @@ const DEFAULT_CONTACTS = [
   { name:"Kofi Atta",      online:false, initials:"KA", color:"#6A1B9A" },
 ];
 
-function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, setVoiceOn, activeChatContact, setActiveChatContact, setTab, prevTab, currentUser, appSocketRef, chatMsgs, setChatMsgs, chatTyping, chatStatus, setChatStatus, authToken }) {
+function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, setVoiceOn, activeChatContact, setActiveChatContact, setTab, prevTab, currentUser, appSocketRef, chatMsgs, setChatMsgs, chatTyping, chatStatus, setChatStatus }) {
   const [activeC, setActiveC]               = useState(null);
   // Utiliser les états globaux du App root
   const localMsgs    = chatMsgs   || {};
@@ -1346,17 +1345,23 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
     setChatStatus(s => ({ ...s, [msgId]: "sent" }));
 
     const sock = appSocketRef?.current;
+<<<<<<< HEAD
+    const doSend = (s) => s.emit("message", { to: contactName, text, msgId });
+=======
     // ✅ Sauvegarder dans Supabase
-    const senderName = (currentUser?.name || currentUser?.email)?.trim();
-    if (authToken) {
-      fetch(`${SUPABASE_URL}/rest/v1/messages`, {
-        method: "POST",
-        headers: { ...sb.headers(authToken), "Prefer": "return=minimal" },
-        body: JSON.stringify({ content: text, sender_name: senderName, receiver_name: contactName?.trim() })
-      }).catch(e => console.error("save msg", e));
-    }
+    const myName = (currentUser?.name || currentUser?.email)?.trim();
+    fetch(`${SUPABASE_URL}/rest/v1/messages`, {
+      method: "POST",
+      headers: { ...sb.headers(authToken), "Prefer": "return=minimal" },
+      body: JSON.stringify({
+        content: text,
+        sender_name: myName,
+        receiver_name: contactName?.trim(),
+      })
+    }).catch(e => console.error("save msg", e));
 
     const doSend = (s) => s.emit("message", { to: contactName?.trim(), text, msgId });
+>>>>>>> parent of 07ff313 (fix: authToken guard + conflit variable myName)
 
     if (sock?.connected) {
       doSend(sock);
@@ -1461,33 +1466,6 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
     const base = name === "Mamadou Diallo" ? msgs.map(m => ({ ...m, status:m.isMe?"read":undefined })) : [];
     return [...base, ...(localMsgs[name]||[])];
   };
-
-  // ✅ Charger messages depuis Supabase à l'ouverture d'une conv
-  const loadMsgsFromDB = async (contactName) => {
-    if (!authToken || !currentUser) return;
-    try {
-      const myName = (currentUser.name || currentUser.email)?.trim();
-      const filter = `&or=(and(sender_name.eq.${encodeURIComponent(myName)},receiver_name.eq.${encodeURIComponent(contactName)}),and(sender_name.eq.${encodeURIComponent(contactName)},receiver_name.eq.${encodeURIComponent(myName)}))`;
-      const r = await fetch(`${SUPABASE_URL}/rest/v1/messages?select=id,content,sender_name,receiver_name,created_at&order=created_at.asc${filter}`, {
-        headers: sb.headers(authToken)
-      });
-      const data = await r.json();
-      if (!Array.isArray(data)) return;
-      const formatted = data.map(m => ({
-        id: m.id,
-        from: m.sender_name,
-        text: m.content,
-        time: new Date(m.created_at).toLocaleTimeString("fr", {hour:"2-digit", minute:"2-digit"}),
-        isMe: m.sender_name?.trim() === myName?.trim(),
-        read: true,
-      }));
-      setLocalMsgs(prev => {
-        const next = { ...prev, [contactName]: formatted };
-        try { localStorage.setItem('ept_msgs', JSON.stringify(next)); } catch{}
-        return next;
-      });
-    } catch(e) { console.error("loadMsgsFromDB", e); }
-  };
   const markRead = (name) => {
     setLocalMsgs(prev => {
       const updated = (prev[name]||[]).map(m => ({ ...m, read: true }));
@@ -1500,14 +1478,6 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
   // ── LISTE DES CONVERSATIONS ────────────────────────────────
   const realNames = Object.keys(localMsgs).filter(n => n && !DEFAULT_CONTACTS.find(d => d.name === n));
   const allContacts = [...DEFAULT_CONTACTS, ...realNames.map(n => ({ name:n, online:true, initials:n.split(" ").map(w=>w[0]).join("").slice(0,2) }))];
-
-  // ✅ Hook avant tout return conditionnel
-  useEffect(() => {
-    if (activeC) {
-      markRead(activeC.name);
-      loadMsgsFromDB(activeC.name); // ✅ Charger depuis Supabase
-    }
-  }, [activeC?.name]);
 
   if (!activeC) return (
     <>
@@ -1553,6 +1523,7 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
   );
 
   // ── FENÊTRE DE CHAT ────────────────────────────────────────
+  useEffect(() => { if (activeC) markRead(activeC.name); }, [activeC?.name]);
   const cMsgs   = getMsgs(activeC.name);
   const bg      = getColor(activeC.name);
   const initials= activeC.initials||activeC.name.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase();
