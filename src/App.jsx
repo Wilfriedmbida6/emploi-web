@@ -114,6 +114,38 @@ const sb = {
       method: "DELETE", headers: sb.headers(token),
     });
   },
+
+  // ── Upload fichier vers Supabase Storage ──────────────────
+  async uploadFile(bucket, path, file, token) {
+    const r = await fetch(`${SUPABASE_URL}/storage/v1/object/${bucket}/${path}`, {
+      method: "POST",
+      headers: { "apikey": SUPABASE_ANON, "Authorization": `Bearer ${token}`, "Content-Type": file.type },
+      body: file,
+    });
+    if (!r.ok) throw new Error("Upload échoué");
+    return `${SUPABASE_URL}/storage/v1/object/public/${bucket}/${path}`;
+  },
+
+  // ── Upload audio (base64 → Blob → Storage) ────────────────
+  async uploadAudio(base64, token) {
+    const arr  = base64.split(",");
+    const mime = arr[0].match(/:(.*?);/)[1];
+    const bin  = atob(arr[1]);
+    const u8   = new Uint8Array(bin.length);
+    for (let i=0; i<bin.length; i++) u8[i] = bin.charCodeAt(i);
+    const blob = new Blob([u8], { type: mime });
+    const path = `voice_${Date.now()}.webm`;
+    return sb.uploadFile("messages", path, blob, token);
+  },
+
+  // ── Charger les messages d'une conv ───────────────────────
+  async loadMessages(userA, userB, token) {
+    const filter = `&or=(and(sender_name.eq.${encodeURIComponent(userA)},receiver_name.eq.${encodeURIComponent(userB)}),and(sender_name.eq.${encodeURIComponent(userB)},receiver_name.eq.${encodeURIComponent(userA)}))&order=created_at.asc&limit=100`;
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/messages?select=*${filter}`, {
+      headers: sb.headers(token),
+    });
+    return r.json();
+  },
 };
 
 // Compte admin (vérification locale, jamais envoyé à Supabase)
@@ -243,9 +275,10 @@ export default function App() {
   const adminUnread = screen==="admin" ? (adminNotifs||[]).filter(n=>!n.read).length : 0;
 
   // Compter messages non lus dans toutes les conversations
-  // ✅ FIX 2 — Badge = seulement les messages non lus
-  const unreadChat = Object.values(globalMsgs || {}).reduce((acc, msgs) =>
-    acc + msgs.filter(m => !m.isMe && !m.read).length, 0);
+  const unreadChat = tab !== "chat"
+    ? Object.values(globalMsgs || {}).reduce((acc, msgs) =>
+        acc + msgs.filter(m => !m.isMe).length, 0)
+    : 0;
 
   const toast$ = (msg, err=false) => {
     setToast({ msg, err });
@@ -278,6 +311,7 @@ export default function App() {
           else { 
             await loadUsers(session.access_token);
             await loadJobs(session.access_token);
+            await loadAllMessages(session.access_token, p?.name || user.email);
             setScreen("user"); setTab("home"); 
           }
 
@@ -325,6 +359,43 @@ export default function App() {
     } catch(e) { console.error("loadJobs error", e); }
   };
 
+  // ✅ FIX 2 — Charger TOUS les messages de l'utilisateur depuis Supabase
+  const loadAllMessages = async (token, myName) => {
+    try {
+      // Récupérer les messages où l'utilisateur est expéditeur ou destinataire
+      const filter = `&or=(sender_name.eq.${encodeURIComponent(myName)},receiver_name.eq.${encodeURIComponent(myName)})&order=created_at.asc&limit=500`;
+      const r = await fetch(`${SUPABASE_URL}/rest/v1/messages?select=*${filter}`, {
+        headers: sb.headers(token),
+      });
+      const rows = await r.json();
+      if (!Array.isArray(rows)) return;
+
+      // Regrouper par interlocuteur
+      const grouped = {};
+      rows.forEach(row => {
+        const isMe      = row.sender_name === myName;
+        const contact   = isMe ? row.receiver_name : row.sender_name;
+        if (!grouped[contact]) grouped[contact] = [];
+        grouped[contact].push({
+          id:       row.id,
+          from:     row.sender_name,
+          text:     row.content || "",
+          time:     new Date(row.created_at).toLocaleTimeString("fr",{hour:"2-digit",minute:"2-digit"}),
+          isMe,
+          read:     isMe || !!row.read_at,
+          isVoice:  row.type === "voice",
+          voiceUrl: row.file_url || null,
+          voiceDur: row.voice_dur || null,
+          isFile:   row.type === "file",
+          fileName: row.file_name || null,
+          fileUrl:  row.file_url  || null,
+          status:   isMe ? "read" : "received",
+        });
+      });
+      setGlobalMsgs(grouped);
+    } catch(e) { console.error("loadAllMessages error", e); }
+  };
+
   // ─── SOCKET.IO GLOBAL — reste connecté peu importe l'onglet ───
   useEffect(() => {
     if (!currentUser?.id) return;
@@ -342,15 +413,6 @@ export default function App() {
     socket.on("connect", () => {
       setSocketReady(true);
       console.log("🟢 Socket global connecté");
-      // ✅ FIX 1 — Demander la liste complète des connectés
-      socket.emit("get_online_list");
-    });
-    // ✅ FIX 1 — Recevoir la liste complète des connectés
-    socket.on("online_list", (names) => {
-      setUsers(u => u.map(x => ({
-        ...x,
-        online: names.includes(x.name),
-      })));
     });
     socket.on("disconnect", () => {
       setSocketReady(false);
@@ -367,31 +429,20 @@ export default function App() {
       setNotifs(n => [{ ...notif, id: Date.now(), read: false }, ...n]);
     });
     socket.on("message", (msg) => {
-      // ✅ FIX 2b — notif + badge uniquement si conv non ouverte
+      const time   = msg.time || new Date().toLocaleTimeString("fr",{hour:"2-digit",minute:"2-digit"});
+      let newMsg   = { ...msg, isMe:false, read:false, time };
+      if (msg.type === "voice" && msg.voiceBase64) {
+        newMsg = { ...newMsg, isVoice:true, voiceUrl:msg.voiceBase64, voiceDur:msg.voiceDur, text:"" };
+      } else if (msg.type === "file") {
+        newMsg = { ...newMsg, isFile:true, fileUrl:msg.fileUrl, fileName:msg.fileName, text:`📎 ${msg.fileName}` };
+      }
       setGlobalMsgs(prev => ({
         ...prev,
-        [msg.from]: [...(prev[msg.from] || []), { ...msg, isMe: false, read: false }],
+        [msg.from]: [...(prev[msg.from] || []), newMsg],
       }));
-      // Notification dans la cloche
-      setNotifs(n => [{
-        id: Date.now(), type: "message",
-        msg: `💬 Nouveau message de ${msg.from}`,
-        from: msg.from, time: "À l'instant", read: false,
-      }, ...n]);
+      // ✅ Notification cloche
+      setNotifs(n => [{ id:Date.now(), type:"message", msg:`💬 Nouveau message de ${msg.from}`, from:msg.from, time:"À l'instant", read:false }, ...n]);
     });
-    // ✅ FIX 3b — Recevoir les nouvelles offres en temps réel
-    socket.on("new_job", (job) => {
-      setJobs(prev => {
-        if (prev.find(j => j.id === job.id)) return prev;
-        return [{ ...job, postedBy: job.posted_by || job.postedBy }, ...prev];
-      });
-      setNotifs(n => [{
-        id: Date.now(), type: "new_job",
-        msg: `💼 Nouvelle offre : ${job.title}`,
-        time: "À l'instant", read: false,
-      }, ...n]);
-    });
-
     socket.on("msg_status", ({ msgId, status }) => {
       setGlobalMsgStatus(s => ({ ...s, [msgId]: status }));
     });
@@ -611,27 +662,14 @@ export default function App() {
       applicants: 0,
     };
     // Sauvegarder dans Supabase
-    let savedJob = null;
     try {
       const saved = await sb.insert("jobs", newJob, authToken);
-      savedJob = Array.isArray(saved) ? saved[0] : null;
-    } catch(e) { console.error("postJob error", e); }
-
-    const finalJob = {
-      ...newJob,
-      id:        savedJob?.id       || Date.now(),
-      postedBy:  savedJob?.posted_by || authorName,
-      posted_by: authorName,
-    };
-
-    // Ajouter localement
-    setJobs(j => [finalJob, ...j]);
-
-    // ✅ FIX 3 — Broadcaster à tous les clients en temps réel
-    if (socketRef.current?.connected) {
-      socketRef.current.emit("new_job", finalJob);
+      const job = Array.isArray(saved) ? saved[0] : { ...newJob, id: Date.now(), postedBy: authorName };
+      setJobs(j => [{ ...job, postedBy: job.posted_by || authorName }, ...j]);
+    } catch(e) {
+      // Fallback local si erreur
+      setJobs(j => [{ id:Date.now(), ...newJob, postedBy: authorName }, ...j]);
     }
-
     setJobForm({ title:"",category:"",city:"",budget:"",urgent:false });
     setShowJob(false); toast$("Offre publiée ! ✅");
   };
@@ -1322,9 +1360,7 @@ function NotifsTab({ notifs, setNotifs, unread, setTab, openChat, setHighlightJo
   </>;
 }
 
-const DEFAULT_CONTACTS = [
-  { name:"Support EPT", online:true, initials:"SE", color:"#C62828" },
-];
+const DEFAULT_CONTACTS = [{ name:"Support EPT", online:true, initials:"SE", color:"#C62828" }];
 
 function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, setVoiceOn, activeChatContact, setActiveChatContact, setTab, prevTab, currentUser, socketRef, globalMsgs, setGlobalMsgs, globalMsgStatus, socketReady }) {
   const [activeC, setActiveC]               = useState(null);
@@ -1366,23 +1402,35 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
   }, [socketRef?.current]);
 
   // ── Envoi message texte ────────────────────────────────────
-  const addMsg = (contactName, text) => {
+  const addMsg = async (contactName, text) => {
     const time  = new Date().toLocaleTimeString("fr", { hour:"2-digit", minute:"2-digit" });
     const msgId = Date.now();
-    const m     = { id:msgId, from:myName, text, time, isMe:true, status:"sent" };
+    const m     = { id:msgId, from:myName, text, time, isMe:true, status:"sent", read:true };
 
-    // Ajouter localement côté expéditeur
+    // 1. Ajouter localement immédiatement (UX rapide)
     setGlobalMsgs(prev => ({
       ...prev,
       [contactName]: [...(prev[contactName] || []), m],
     }));
 
-    // Envoyer via socket global
+    // 2. Envoyer via socket
     if (socketRef?.current?.connected) {
       socketRef.current.emit("message", { to: contactName, text, msgId });
-    } else {
-      console.warn("⚠️ Socket non connecté — message non envoyé");
     }
+
+    // 3. ✅ FIX 3 — Sauvegarder dans Supabase (persist au refresh)
+    try {
+      const token = currentUser?.token;
+      if (token) {
+        await sb.insert("messages", {
+          sender_name:   myName,
+          receiver_name: contactName,
+          content:       text,
+          type:          "text",
+          created_at:    new Date().toISOString(),
+        }, token);
+      }
+    } catch(e) { console.warn("Sauvegarde message échouée", e); }
   };
 
   // ── Indicateur frappe sortant ──────────────────────────────
@@ -1394,22 +1442,14 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
       socketRef.current?.emit("typing", { to: activeC.name, typing: false }), 2000);
   };
 
-  // ── Marquer comme lu quand on ouvre la conv ──────────────
+  // ── Marquer comme lu ───────────────────────────────────────
   useEffect(() => {
-    if (!activeC) return;
-    // ✅ FIX 2c — marquer tous les messages de cette conv comme lus
-    setGlobalMsgs(prev => {
-      const conv = (prev[activeC.name] || []).map(m =>
-        !m.isMe ? { ...m, read: true } : m
-      );
-      return { ...prev, [activeC.name]: conv };
-    });
-    if (socketRef?.current?.connected) {
+    if (activeC && socketRef?.current?.connected) {
       getMsgs(activeC.name).filter(m => !m.isMe && m.id).forEach(m =>
         socketRef.current.emit("msg_status", { msgId: m.id, status: "read", to: m.from })
       );
     }
-  }, [activeC?.name]);
+  }, [activeC]);
 
   // ── Voice recording ────────────────────────────────────────
   const startRecording = async () => {
@@ -1448,14 +1488,57 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
     setVoiceState("idle"); setVoiceSeconds(0);
     if (voiceUrl) { URL.revokeObjectURL(voiceUrl); setVoiceUrl(null); }
   };
-  const sendVoiceMsg = (contactName) => {
+  const sendVoiceMsg = async (contactName) => {
     if (!voiceUrl) return;
     const dur   = fmtSecs(voiceSeconds);
     const msgId = Date.now();
     const time  = new Date().toLocaleTimeString("fr", { hour:"2-digit", minute:"2-digit" });
-    const m     = { id:msgId, from:myName, text:"", time, isMe:true, status:"sent", isVoice:true, voiceUrl, voiceDur:dur };
-    setGlobalMsgs(prev => ({ ...prev, [contactName]: [...(prev[contactName]||[]), m] }));
-    setVoiceState("idle"); setVoiceSeconds(0); setVoiceUrl(null);
+
+    // Afficher localement tout de suite
+    const localM = { id:msgId, from:myName, text:"", time, isMe:true, status:"sent", isVoice:true, voiceUrl, voiceDur:dur, read:true };
+    setGlobalMsgs(prev => ({ ...prev, [contactName]: [...(prev[contactName]||[]), localM] }));
+    setVoiceState("idle"); setVoiceSeconds(0);
+
+    try {
+      // Convertir blob URL → base64 pour socket + Supabase
+      const resp    = await fetch(voiceUrl);
+      const blob    = await resp.blob();
+      const base64  = await new Promise(res => {
+        const r = new FileReader();
+        r.onload = () => res(r.result);
+        r.readAsDataURL(blob);
+      });
+
+      // ✅ FIX 4a — Envoyer via socket (base64 pour temps réel)
+      if (socketRef?.current?.connected) {
+        socketRef.current.emit("message", {
+          to: contactName, msgId, type:"voice",
+          voiceBase64: base64, voiceDur: dur,
+        });
+      }
+
+      // ✅ FIX 4b — Upload vers Supabase Storage
+      const token = currentUser?.token;
+      if (token) {
+        const publicUrl = await sb.uploadAudio(base64, token);
+        await sb.insert("messages", {
+          sender_name:   myName,
+          receiver_name: contactName,
+          type:          "voice",
+          file_url:      publicUrl,
+          voice_dur:     dur,
+          created_at:    new Date().toISOString(),
+        }, token);
+        // Mettre à jour l'URL locale avec l'URL publique Supabase
+        setGlobalMsgs(prev => ({
+          ...prev,
+          [contactName]: (prev[contactName]||[]).map(m =>
+            m.id === msgId ? { ...m, voiceUrl: publicUrl } : m
+          ),
+        }));
+      }
+    } catch(e) { console.warn("Envoi vocal échoué", e); }
+    setVoiceUrl(null);
   };
 
   // ── Appel vocal ────────────────────────────────────────────
@@ -1514,7 +1597,7 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
       {allContacts.map(name => {
         const convMsgs = getMsgs(name);
         const last     = convMsgs[convMsgs.length - 1];
-        const unread   = convMsgs.filter(m => !m.isMe && !m.read).length; // ✅ FIX 2d
+        const unread   = convMsgs.filter(m => !m.isMe).length;
         return (
           <div key={name} style={{ background:"#122236", borderRadius:14, padding:14, marginBottom:10, display:"flex", alignItems:"center", gap:12, border: unread>0 ? "1px solid #1E88E5" : "1px solid #1e3a52", cursor:"pointer" }}
             onClick={()=>setActiveC({ name, initials: name.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase(), online:true })}>
@@ -1612,6 +1695,11 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
                     <div style={{ fontSize:11, color:"rgba(255,255,255,.7)", marginBottom:4 }}>🎙 {m.voiceDur}</div>
                     <audio src={m.voiceUrl} controls style={{ width:"100%", height:32, borderRadius:6 }} />
                   </div>
+                ) : m.isFile ? (
+                  <div>
+                    <div style={{ fontSize:13, marginBottom:4 }}>📎 {m.fileName||"Fichier"}</div>
+                    {m.fileUrl && <a href={m.fileUrl} target="_blank" rel="noreferrer" style={{ fontSize:11, color:"rgba(255,255,255,.65)", textDecoration:"underline" }}>Télécharger ↓</a>}
+                  </div>
                 ) : m.text}
                 <div style={{ fontSize:10, color:"rgba(255,255,255,.45)", marginTop:4, textAlign:"right", display:"flex", alignItems:"center", justifyContent:"flex-end" }}>
                   <span>{m.time}</span>{checkmark}
@@ -1672,7 +1760,29 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
           onClick={voiceState==="idle"?startRecording:voiceState==="recording"?pauseRecording:voiceState==="paused"?resumeRecording:cancelRecording}>
           {voiceState==="recording"?"🔴":voiceState==="paused"?"⏸":voiceState==="preview"?"✕":"🎙"}
         </button>
-        <button style={{ background:"#1e3a52", border:"none", borderRadius:10, padding:"10px 12px", cursor:"pointer", fontSize:18, color:"#90A4AE" }}>📎</button>
+        <input type="file" id="ept-file-input" style={{ display:"none" }} accept="*/*"
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            if (!file || !activeC) return;
+            e.target.value = "";
+            const msgId = Date.now();
+            const time  = new Date().toLocaleTimeString("fr",{hour:"2-digit",minute:"2-digit"});
+            const localM = { id:msgId, from:myName, text:`📎 ${file.name}`, time, isMe:true, status:"sent", isFile:true, fileName:file.name, read:true };
+            setGlobalMsgs(prev => ({ ...prev, [activeC.name]: [...(prev[activeC.name]||[]), localM] }));
+            try {
+              const token = currentUser?.token;
+              if (!token) return;
+              const path      = `files/${Date.now()}_${file.name.replace(/\s+/g,"_")}`;
+              const publicUrl = await sb.uploadFile("messages", path, file, token);
+              if (socketRef?.current?.connected) {
+                socketRef.current.emit("message", { to:activeC.name, msgId, type:"file", text:`📎 ${file.name}`, fileUrl:publicUrl, fileName:file.name });
+              }
+              await sb.insert("messages", { sender_name:myName, receiver_name:activeC.name, type:"file", content:`📎 ${file.name}`, file_url:publicUrl, file_name:file.name, created_at:new Date().toISOString() }, token);
+              setGlobalMsgs(prev => ({ ...prev, [activeC.name]: (prev[activeC.name]||[]).map(m => m.id===msgId ? {...m, fileUrl:publicUrl} : m) }));
+            } catch(err) { console.warn("Upload fichier échoué", err); }
+          }} />
+        <button style={{ background:"#1e3a52", border:"none", borderRadius:10, padding:"10px 12px", cursor:"pointer", fontSize:18, color:"#90A4AE" }}
+          onClick={()=>document.getElementById("ept-file-input").click()}>📎</button>
         <input style={{ flex:1, background:"#0a1520", border:"1px solid #1e3a52", borderRadius:20, padding:"10px 16px", color:"#E8F0FE", fontSize:14, outline:"none", fontFamily:"inherit" }}
           placeholder={`Message à ${activeC.name.split(" ")[0]}…`}
           value={newMsg} onChange={e=>{ setNewMsg(e.target.value); onTyping(); }}
