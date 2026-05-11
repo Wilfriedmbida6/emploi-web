@@ -268,6 +268,12 @@ export default function App() {
   const unread      = notifs.filter(n => !n.read).length;
   const adminUnread = screen==="admin" ? (adminNotifs||[]).filter(n=>!n.read).length : 0;
 
+  // Compter messages non lus dans toutes les conversations
+  const unreadChat = tab !== "chat"
+    ? Object.values(globalMsgs || {}).reduce((acc, msgs) =>
+        acc + msgs.filter(m => !m.isMe).length, 0)
+    : 0;
+
   const toast$ = (msg, err=false) => {
     setToast({ msg, err });
     setTimeout(() => setToast(null), 3500);
@@ -368,8 +374,12 @@ export default function App() {
       setSocketReady(false);
       console.log("🔴 Socket déconnecté");
     });
-    socket.on("user_online", ({ name, online }) => {
-      setUsers(u => u.map(x => x.name === name ? { ...x, online } : x));
+    socket.on("user_online", ({ name, userId, online }) => {
+      setUsers(u => u.map(x =>
+        (x.id === userId || x.name?.toLowerCase() === name?.toLowerCase())
+          ? { ...x, online }
+          : x
+      ));
     });
     socket.on("notification", (notif) => {
       setNotifs(n => [{ ...notif, id: Date.now(), read: false }, ...n]);
@@ -802,7 +812,7 @@ export default function App() {
     { id:"home",        icon:"🏠", label:"Accueil" },
     { id:"jobs",        icon:"💼", label:"Offres" },
     { id:"techniciens", icon:"🔧", label:"Techs" },
-    { id:"chat",        icon:"💬", label:"Chat" },
+    { id:"chat",        icon:"💬", label:"Chat",  badge: unreadChat },
     { id:"profile",     icon:"👤", label:"Profil" },
   ];
   return (
@@ -815,7 +825,9 @@ export default function App() {
       )}
       <NavBar title="Emploi pour Tous" extra={
         <>
-          <button style={{ ...css.btn("#1e3a52"), padding:"6px 12px", border:`1px solid ${C.border}`, fontSize:13 }} onClick={()=>{ setActiveChatContact(null); setTab("chat"); }}>💬</button>
+          <button style={{ ...css.btn("#1e3a52"), padding:"6px 12px", border:`1px solid ${C.border}`, fontSize:13, position:"relative" }} onClick={()=>{ setActiveChatContact(null); setTab("chat"); }}>
+            💬{unreadChat>0&&<span style={{ position:"absolute", top:-4, right:-4, background:C.red, color:"#fff", borderRadius:"50%", width:16, height:16, fontSize:9, display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800 }}>{unreadChat}</span>}
+          </button>
           <button style={{ ...css.btn("#1e3a52"), padding:"6px 12px", border:`1px solid ${C.border}`, fontSize:13, marginLeft:6, position:"relative" }} onClick={()=>setTab("notifs")}>
             🔔{unread>0&&<span style={{ position:"absolute", top:-4, right:-4, background:C.red, color:"#fff", borderRadius:"50%", width:16, height:16, fontSize:9, display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800 }}>{unread}</span>}
           </button>
@@ -1444,8 +1456,12 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
   ].sort((a,b) => (a.id||0) - (b.id||0));
 
   // ── Liste contacts ─────────────────────────────────────────
-  // Construire la liste des conversations depuis les messages reçus
-  const allContacts = Object.keys(globalMsgs || {});
+  // Trier conversations par message le plus récent
+  const allContacts = Object.keys(globalMsgs || {}).sort((a, b) => {
+    const lastA = (globalMsgs[a] || []).at(-1)?.id || 0;
+    const lastB = (globalMsgs[b] || []).at(-1)?.id || 0;
+    return lastB - lastA; // plus récent en premier
+  });
 
   if (!activeC) return (
     <>
@@ -1473,13 +1489,13 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
         </div>
       )}
 
-      {/* Liste des conversations avec messages */}
+      {/* Liste des conversations — plus récente en premier */}
       {allContacts.map(name => {
         const convMsgs = getMsgs(name);
         const last     = convMsgs[convMsgs.length - 1];
         const unread   = convMsgs.filter(m => !m.isMe).length;
         return (
-          <div key={name} style={{ background:"#122236", borderRadius:14, padding:14, marginBottom:10, display:"flex", alignItems:"center", gap:12, border:"1px solid #1e3a52", cursor:"pointer" }}
+          <div key={name} style={{ background:"#122236", borderRadius:14, padding:14, marginBottom:10, display:"flex", alignItems:"center", gap:12, border: unread>0 ? "1px solid #1E88E5" : "1px solid #1e3a52", cursor:"pointer" }}
             onClick={()=>setActiveC({ name, initials: name.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase(), online:true })}>
             <div style={{ position:"relative" }}>
               <div style={{ width:50, height:50, borderRadius:"50%", background:getColor(name), display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800, fontSize:16, color:"#fff" }}>
@@ -1487,14 +1503,14 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
               </div>
             </div>
             <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ fontWeight:700, fontSize:14, color:"#E8F0FE" }}>{name}</div>
-              <div style={{ fontSize:12, color:"#90A4AE", marginTop:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+              <div style={{ fontWeight:700, fontSize:14, color: unread>0 ? "#E8F0FE" : "#90A4AE" }}>{name}</div>
+              <div style={{ fontSize:12, color: unread>0 ? "#1E88E5" : "#607080", marginTop:2, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", fontWeight: unread>0 ? 700 : 400 }}>
                 {last?.isVoice ? "🎙 Message vocal" : last?.text?.slice(0,40) || "Démarrer la conversation"}
               </div>
             </div>
             <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:4, flexShrink:0 }}>
               <div style={{ fontSize:11, color:"#607080" }}>{last?.time || ""}</div>
-              {unread > 0 && <div style={{ width:18, height:18, borderRadius:"50%", background:C.accent, display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:800, color:"#fff" }}>{unread}</div>}
+              {unread > 0 && <div style={{ width:20, height:20, borderRadius:"50%", background:"#1E88E5", display:"flex", alignItems:"center", justifyContent:"center", fontSize:10, fontWeight:800, color:"#fff" }}>{unread}</div>}
             </div>
           </div>
         );
