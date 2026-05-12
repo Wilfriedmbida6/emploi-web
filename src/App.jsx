@@ -115,7 +115,7 @@ const sb = {
     });
   },
 
-  // ── MESSAGES ──────────────────────────────────────────────
+  // Messages — sauvegarder
   async saveMessage(data, token) {
     const r = await fetch(`${SUPABASE_URL}/rest/v1/messages`, {
       method: "POST",
@@ -125,19 +125,23 @@ const sb = {
     return r.json();
   },
 
+  // Messages — charger
   async loadMessages(myName, token) {
-    const encoded = encodeURIComponent(myName);
+    const e = encodeURIComponent(myName);
     const r = await fetch(
-      `${SUPABASE_URL}/rest/v1/messages?or=(from_user.eq.${encoded},to_user.eq.${encoded})&order=time.asc`,
+      `${SUPABASE_URL}/rest/v1/messages?or=(from_user.eq.${e},to_user.eq.${e})&order=time.asc`,
       { headers: sb.headers(token) }
     );
     return r.json();
   },
 
+  // Messages — marquer lu
   async markRead(fromUser, toUser, token) {
+    const f = encodeURIComponent(fromUser);
+    const t2 = encodeURIComponent(toUser);
     await fetch(
-      `${SUPABASE_URL}/rest/v1/messages?from_user=eq.${encodeURIComponent(fromUser)}&to_user=eq.${encodeURIComponent(toUser)}&read=eq.false`,
-      { method: "PATCH", headers: { ...sb.headers(token), "Prefer": "return=minimal" }, body: JSON.stringify({ read: true }) }
+      `${SUPABASE_URL}/rest/v1/messages?from_user=eq.${f}&to_user=eq.${t2}&read=eq.false`,
+      { method:"PATCH", headers:{ ...sb.headers(token), "Prefer":"return=minimal" }, body:JSON.stringify({ read:true }) }
     );
   },
 };
@@ -278,7 +282,7 @@ export default function App() {
   const [globalMsgs, setGlobalMsgs]           = useState({});
   const [globalMsgStatus, setGlobalMsgStatus] = useState({});
   const [socketReady, setSocketReady]         = useState(false);
-  const [readContacts, setReadContacts]       = useState(new Set());
+  const [readContacts, setReadContacts] = useState(new Set());
 
   // Form fields
   const [email, setEmail]   = useState("");
@@ -294,8 +298,8 @@ export default function App() {
 
   const unread      = notifs.filter(n => !n.read).length;
   const adminUnread = screen==="admin" ? (adminNotifs||[]).filter(n=>!n.read).length : 0;
-  const unreadChat  = Object.entries(globalMsgs || {}).reduce((acc, [contact, msgs]) =>
-    readContacts.has(contact) ? acc : acc + msgs.filter(m => !m.isMe).length, 0);
+  const unreadChat  = Object.entries(globalMsgs||{}).reduce((acc,[c,ms]) =>
+    readContacts.has(c) ? acc : acc + ms.filter(m=>!m.isMe).length, 0);
 
   const toast$ = (msg, err=false) => {
     setToast({ msg, err });
@@ -370,13 +374,12 @@ export default function App() {
   };
 
   const loadJobs = async (token) => {
-    try {
-      const data = await sb.select("jobs", "*", token, "&order=date.desc");
-      if (Array.isArray(data)) setJobs(data.map(j => ({ ...j, postedBy: j.posted_by || j.postedBy })));
-    } catch(e) { console.error("loadJobs error", e); }
-  };
+  try {
+    const data = await sb.select("jobs", "*", token, "&order=date.desc");
+    if (Array.isArray(data)) setJobs(data.map(j=>({...j, postedBy:j.posted_by||j.postedBy})));
+  } catch(e) { console.error("loadJobs error", e); }
+};
 
-  // Charger les messages depuis Supabase et les organiser par contact
   const loadMessages = async (myName, token) => {
     try {
       const data = await sb.loadMessages(myName, token);
@@ -387,16 +390,10 @@ export default function App() {
         const contact = isMe ? m.to_user : m.from_user;
         if (!organized[contact]) organized[contact] = [];
         organized[contact].push({
-          id: m.id,
-          from: m.from_user,
-          to: m.to_user,
+          id: m.id, from: m.from_user, to: m.to_user,
           text: m.text || "",
-          time: new Date(m.time).toLocaleTimeString("fr", { hour:"2-digit", minute:"2-digit" }),
-          isMe,
-          read: m.read,
-          isVoice: m.is_voice,
-          voiceUrl: m.voice_url,
-          voiceDur: m.voice_dur,
+          time: new Date(m.time).toLocaleTimeString("fr",{hour:"2-digit",minute:"2-digit"}),
+          isMe, read: m.read,
         });
       });
       setGlobalMsgs(organized);
@@ -432,30 +429,13 @@ export default function App() {
       setNotifs(n => [{ ...notif, id: Date.now(), read: false }, ...n]);
     });
     socket.on("message", (msg) => {
-      const contact = msg.from;
-      const newMsg = { ...msg, isMe: false };
       setGlobalMsgs(prev => ({
         ...prev,
-        [contact]: [...(prev[contact] || []), newMsg],
+        [msg.from]: [...(prev[msg.from] || []), { ...msg, isMe: false }],
       }));
-      // Marquer non lu si pas sur l'onglet chat avec ce contact
-      setReadContacts(prev => {
-        const s = new Set(prev);
-        s.delete(contact); // forcer réaffichage badge
-        return s;
-      });
     });
     socket.on("msg_status", ({ msgId, status }) => {
       setGlobalMsgStatus(s => ({ ...s, [msgId]: status }));
-    });
-
-    // Nouvelle offre publiée — reçue par tous les autres membres
-    socket.on("new_job", ({ job, notification }) => {
-      setJobs(j => j.find(x => x.id === job.id) ? j : [job, ...j]);
-      if (notification) {
-        setNotifs(n => [{ ...notification, id: Date.now(), read: false }, ...n]);
-        toast$(notification.msg);
-      }
     });
 
     // Recharger les données toutes les 30s
@@ -519,8 +499,8 @@ export default function App() {
       setCurrentUser(user);
       await loadUsers(d.access_token);
       await loadJobs(d.access_token);
-      await loadMessages(user.name || user.email, d.access_token);
       setScreen("user"); setTab("home");
+      await loadMessages(user.name || user.email, d.access_token);
       toast$(`Bienvenue ${user.name} ! 🎉`);
       
     } catch {
@@ -664,39 +644,34 @@ export default function App() {
   const postJob = async () => {
     if (!jobForm.title || !jobForm.category) { toast$("Titre et catégorie requis", true); return; }
     const authorName  = currentUser?.name || currentUser?.email || "Moi";
+    const authorPhoto = currentUser?.photo_url || null;
     const newJob = {
       ...jobForm,
       posted_by: authorName,
+      posted_by_photo: authorPhoto,
       date: new Date().toISOString().slice(0,10),
       status: "open",
       applicants: 0,
     };
-    let savedJob = { ...newJob, id: Date.now(), postedBy: authorName };
+    // Sauvegarder dans Supabase
     try {
       const saved = await sb.insert("jobs", newJob, authToken);
-      if (Array.isArray(saved) && saved[0]) {
-        savedJob = { ...saved[0], postedBy: saved[0].posted_by || authorName };
-      }
-    } catch(e) { console.error("postJob error", e); }
-
-    // Ajouter localement
-    setJobs(j => [savedJob, ...j]);
-
+      const job = Array.isArray(saved) ? saved[0] : { ...newJob, id: Date.now(), postedBy: authorName };
+      setJobs(j => [{ ...job, postedBy: job.posted_by || authorName }, ...j]);
+    } catch(e) {
+      // Fallback local si erreur
+      setJobs(j => [{ id:Date.now(), ...newJob, postedBy: authorName }, ...j]);
+    }
+    setJobForm({ title:"",category:"",city:"",budget:"",urgent:false });
+    setJobForm({ title:"",category:"",city:"",budget:"",urgent:false });
+    setShowJob(false); toast$("Offre publiée ! ✅");
     // Diffuser à tous via socket
     if (socketRef.current?.connected) {
       socketRef.current.emit("new_job", {
-        job: savedJob,
-        notification: {
-          type: "job",
-          msg: `💼 Nouvelle offre : "${jobForm.title}" par ${authorName}`,
-          from: authorName,
-          time: "À l'instant",
-        }
+        job: { ...newJob, postedBy: authorName },
+        notification: { type:"job", msg:`💼 Nouvelle offre : "${jobForm.title}"`, from:authorName, time:"À l'instant" }
       });
     }
-
-    setJobForm({ title:"",category:"",city:"",budget:"",urgent:false });
-    setShowJob(false); toast$("Offre publiée ! ✅");
   };
 
   const filteredUsers = (list) => list.filter(u =>
@@ -890,7 +865,7 @@ export default function App() {
     { id:"home",        icon:"🏠", label:"Accueil" },
     { id:"jobs",        icon:"💼", label:"Offres" },
     { id:"techniciens", icon:"🔧", label:"Techs" },
-    { id:"chat",        icon:"💬", label:"Chat", badge: unreadChat },
+    { id:"chat", icon:"💬", label:"Chat", badge: unreadChat },
     { id:"profile",     icon:"👤", label:"Profil" },
   ];
   return (
@@ -913,7 +888,7 @@ export default function App() {
         {tab==="home"        && <HomeTab users={users} jobs={jobs} setTab={setTab} toast$={toast$} openChat={openChat} handlePostuler={handlePostuler} setOnlineFilter={setOnlineFilter} openProfile={openProfile} />}
         {tab==="jobs"        && <JobsTab jobs={jobs} setJobs={setJobs} showJob={showJob} setShowJob={setShowJob} jobForm={jobForm} setJobForm={setJobForm} postJob={postJob} toast$={toast$} currentUser={currentUser} setTab={setTab} openChat={openChat} handlePostuler={handlePostuler} highlightJob={highlightJob} prevTab={prevTab} openProfile={openProfile} />}
         {tab==="techniciens" && <TechsTab users={filteredUsers(users.filter(u=>u.role==="technicien" && u.id !== currentUser?.id && u.email !== currentUser?.email && (!onlineFilter || u.online)))} searchQ={searchQ} setSearchQ={setSearchQ} selUser={selUser} setSelUser={setSelUser} setTab={setTab} toast$={toast$} myRatings={myRatings} setMyRatings={setMyRatings} openChat={openChat} onlineFilter={onlineFilter} setOnlineFilter={setOnlineFilter} viewProfileUser={viewProfileUser} setViewProfileUser={setViewProfileUser} />}
-        {tab==="chat"        && <ChatTab msgs={msgs} setMsgs={setMsgs} newMsg={newMsg} setNewMsg={setNewMsg} sendMsg={sendMsg} chatRef={chatRef} voiceOn={voiceOn} setVoiceOn={setVoiceOn} activeChatContact={activeChatContact} setActiveChatContact={setActiveChatContact} setTab={setTab} prevTab={prevTab} currentUser={currentUser} socketRef={socketRef} globalMsgs={globalMsgs} setGlobalMsgs={setGlobalMsgs} globalMsgStatus={globalMsgStatus} socketReady={socketReady} readContacts={readContacts} setReadContacts={setReadContacts} />}
+        {tab==="chat"        && <ChatTab msgs={msgs} setMsgs={setMsgs} newMsg={newMsg} setNewMsg={setNewMsg} sendMsg={sendMsg} chatRef={chatRef} voiceOn={voiceOn} setVoiceOn={setVoiceOn} activeChatContact={activeChatContact} setActiveChatContact={setActiveChatContact} setTab={setTab} prevTab={prevTab} currentUser={currentUser} socketRef={socketRef} globalMsgs={globalMsgs} setGlobalMsgs={setGlobalMsgs} globalMsgStatus={globalMsgStatus} socketReady={socketReady} />}
         {tab==="profile"     && <ProfileTab currentUser={currentUser} doLogout={doLogout} toast$={toast$} openChat={openChat} setTab={setTab} />}
         {tab==="notifs"      && <NotifsTab notifs={notifs} setNotifs={setNotifs} unread={unread} setTab={setTab} openChat={openChat} setHighlightJob={setHighlightJob} />}
       </div>
@@ -1389,7 +1364,7 @@ const DEFAULT_CONTACTS = [
   { name:"Kofi Atta",      online:false, initials:"KA", color:"#6A1B9A" },
 ];
 
-function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, setVoiceOn, activeChatContact, setActiveChatContact, setTab, prevTab, currentUser, socketRef, globalMsgs, setGlobalMsgs, globalMsgStatus, socketReady, readContacts, setReadContacts }) {
+function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, setVoiceOn, activeChatContact, setActiveChatContact, setTab, prevTab, currentUser, socketRef, globalMsgs, setGlobalMsgs, globalMsgStatus, socketReady }) {
   const [activeC, setActiveC]               = useState(null);
   const [typingContacts, setTypingContacts] = useState({});
   const [selectedMsg, setSelectedMsg]       = useState(null);
@@ -1429,32 +1404,22 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
   }, [socketRef?.current]);
 
   // ── Envoi message texte ────────────────────────────────────
-  const addMsg = async (contactName, text) => {
+  const addMsg = (contactName, text) => {
     const time  = new Date().toLocaleTimeString("fr", { hour:"2-digit", minute:"2-digit" });
     const msgId = Date.now();
-    const m     = { id:msgId, from:myName, to:contactName, text, time, isMe:true, status:"sent" };
+    const m     = { id:msgId, from:myName, text, time, isMe:true, status:"sent" };
 
-    // Ajouter localement côté expéditeur immédiatement
+    // Ajouter localement côté expéditeur
     setGlobalMsgs(prev => ({
       ...prev,
       [contactName]: [...(prev[contactName] || []), m],
     }));
 
-    // Sauvegarder en Supabase pour persistance
-    try {
-      await sb.saveMessage({
-        from_user: myName,
-        to_user: contactName,
-        text,
-        read: false,
-      }, currentUser?.token);
-    } catch(e) { console.error("saveMessage error", e); }
-
-    // Envoyer via socket global pour temps réel
+    // Envoyer via socket global
     if (socketRef?.current?.connected) {
       socketRef.current.emit("message", { to: contactName, text, msgId });
     } else {
-      console.warn("⚠️ Socket non connecté");
+      console.warn("⚠️ Socket non connecté — message non envoyé");
     }
   };
 
@@ -1467,22 +1432,18 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
       socketRef.current?.emit("typing", { to: activeC.name, typing: false }), 2000);
   };
 
-  // ── Marquer comme lu à l'ouverture de la conversation ────
+  // ── Marquer comme lu ───────────────────────────────────────
   useEffect(() => {
-    if (!activeC) return;
-    // Marquer dans readContacts → badge disparaît
-    setReadContacts?.(prev => new Set([...(prev || []), activeC.name]));
-    // Informer socket
-    if (socketRef?.current?.connected) {
-      getMsgs(activeC.name).filter(m => !m.isMe && m.id).forEach(m =>
-        socketRef.current.emit("msg_status", { msgId: m.id, status: "read", to: m.from })
-      );
-    }
-    // Marquer lu en Supabase
-    if (currentUser?.token && activeC.name) {
-      sb.markRead(activeC.name, myName, currentUser.token).catch(() => {});
-    }
-  }, [activeC?.name]);
+  if (!activeC) return;
+  setReadContacts?.(prev => new Set([...(prev||[]), activeC.name]));
+  if (socketRef?.current?.connected) {
+    getMsgs(activeC.name).filter(m=>!m.isMe&&m.id).forEach(m=>
+      socketRef.current.emit("msg_status",{msgId:m.id,status:"read",to:m.from}));
+  }
+  if (currentUser?.token) {
+    sb.markRead(activeC.name, myName, currentUser.token).catch(()=>{});
+  }
+}, [activeC?.name]);
 
   // ── Voice recording ────────────────────────────────────────
   const startRecording = async () => {

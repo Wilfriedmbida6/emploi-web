@@ -103,10 +103,21 @@ io.on("connection", (socket) => {
   });
 
   // ── Statut message ─────────────────────────────────────────
-  socket.on("msg_status", ({ msgId, status, to }) => {
-    const dest = findSocket(to);
-    if (dest) io.to(dest).emit("msg_status", { msgId, status });
-  });
+  socket.on("message", (msg) => {
+      setGlobalMsgs(prev => ({
+        ...prev,
+        [msg.from]: [...(prev[msg.from]||[]), {...msg, isMe:false}],
+      }));
+      setReadContacts(prev => { const s=new Set(prev); s.delete(msg.from); return s; });
+    });
+
+  socket.on("new_job", ({ job, notification }) => {
+      setJobs(j => j.find(x=>x.id===job.id) ? j : [job,...j]);
+      if (notification) {
+        setNotifs(n=>[{...notification,id:Date.now(),read:false},...n]);
+        toast$(notification.msg);
+      }
+    });
 
   // ── Typing indicator ───────────────────────────────────────
   socket.on("typing", ({ to, typing }) => {
