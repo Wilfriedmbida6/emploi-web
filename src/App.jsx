@@ -114,6 +114,32 @@ const sb = {
       method: "DELETE", headers: sb.headers(token),
     });
   },
+
+  // ── MESSAGES ──────────────────────────────────────────────
+  async saveMessage(data, token) {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/messages`, {
+      method: "POST",
+      headers: { ...sb.headers(token), "Prefer": "return=representation" },
+      body: JSON.stringify(data),
+    });
+    return r.json();
+  },
+
+  async loadMessages(myName, token) {
+    const encoded = encodeURIComponent(myName);
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/messages?or=(from_user.eq.${encoded},to_user.eq.${encoded})&order=time.asc`,
+      { headers: sb.headers(token) }
+    );
+    return r.json();
+  },
+
+  async markRead(fromUser, toUser, token) {
+    await fetch(
+      `${SUPABASE_URL}/rest/v1/messages?from_user=eq.${encodeURIComponent(fromUser)}&to_user=eq.${encodeURIComponent(toUser)}&read=eq.false`,
+      { method: "PATCH", headers: { ...sb.headers(token), "Prefer": "return=minimal" }, body: JSON.stringify({ read: true }) }
+    );
+  },
 };
 
 // Compte admin (vérification locale, jamais envoyé à Supabase)
@@ -252,7 +278,7 @@ export default function App() {
   const [globalMsgs, setGlobalMsgs]           = useState({});
   const [globalMsgStatus, setGlobalMsgStatus] = useState({});
   const [socketReady, setSocketReady]         = useState(false);
-  const [readContacts, setReadContacts]       = useState(new Set()); // contacts dont les msgs sont lus
+  const [readContacts, setReadContacts]       = useState(new Set());
 
   // Form fields
   const [email, setEmail]   = useState("");
@@ -268,12 +294,8 @@ export default function App() {
 
   const unread      = notifs.filter(n => !n.read).length;
   const adminUnread = screen==="admin" ? (adminNotifs||[]).filter(n=>!n.read).length : 0;
-
-  // Compter messages non lus — exclure les conversations déjà ouvertes
-  const unreadChat = Object.entries(globalMsgs || {}).reduce((acc, [contact, msgs]) => {
-    if (readContacts.has(contact)) return acc;
-    return acc + msgs.filter(m => !m.isMe).length;
-  }, 0);
+  const unreadChat  = Object.entries(globalMsgs || {}).reduce((acc, [contact, msgs]) =>
+    readContacts.has(contact) ? acc : acc + msgs.filter(m => !m.isMe).length, 0);
 
   const toast$ = (msg, err=false) => {
     setToast({ msg, err });
@@ -306,6 +328,7 @@ export default function App() {
           else { 
             await loadUsers(session.access_token);
             await loadJobs(session.access_token);
+            await loadMessages(p?.name || user.email, session.access_token);
             setScreen("user"); setTab("home"); 
           }
 
@@ -348,9 +371,36 @@ export default function App() {
 
   const loadJobs = async (token) => {
     try {
-      const data = await sb.select("jobs", "*", token);
-      if (Array.isArray(data) && data.length > 0) setJobs(data);
+      const data = await sb.select("jobs", "*", token, "&order=date.desc");
+      if (Array.isArray(data)) setJobs(data.map(j => ({ ...j, postedBy: j.posted_by || j.postedBy })));
     } catch(e) { console.error("loadJobs error", e); }
+  };
+
+  // Charger les messages depuis Supabase et les organiser par contact
+  const loadMessages = async (myName, token) => {
+    try {
+      const data = await sb.loadMessages(myName, token);
+      if (!Array.isArray(data)) return;
+      const organized = {};
+      data.forEach(m => {
+        const isMe = m.from_user === myName;
+        const contact = isMe ? m.to_user : m.from_user;
+        if (!organized[contact]) organized[contact] = [];
+        organized[contact].push({
+          id: m.id,
+          from: m.from_user,
+          to: m.to_user,
+          text: m.text || "",
+          time: new Date(m.time).toLocaleTimeString("fr", { hour:"2-digit", minute:"2-digit" }),
+          isMe,
+          read: m.read,
+          isVoice: m.is_voice,
+          voiceUrl: m.voice_url,
+          voiceDur: m.voice_dur,
+        });
+      });
+      setGlobalMsgs(organized);
+    } catch(e) { console.error("loadMessages error", e); }
   };
 
   // ─── SOCKET.IO GLOBAL — reste connecté peu importe l'onglet ───
@@ -382,23 +432,29 @@ export default function App() {
       setNotifs(n => [{ ...notif, id: Date.now(), read: false }, ...n]);
     });
     socket.on("message", (msg) => {
+      const contact = msg.from;
+      const newMsg = { ...msg, isMe: false };
       setGlobalMsgs(prev => ({
         ...prev,
-        [msg.from]: [...(prev[msg.from] || []), { ...msg, isMe: false }],
+        [contact]: [...(prev[contact] || []), newMsg],
       }));
+      // Marquer non lu si pas sur l'onglet chat avec ce contact
+      setReadContacts(prev => {
+        const s = new Set(prev);
+        s.delete(contact); // forcer réaffichage badge
+        return s;
+      });
     });
     socket.on("msg_status", ({ msgId, status }) => {
       setGlobalMsgStatus(s => ({ ...s, [msgId]: status }));
     });
 
-    // Nouvelle offre publiée par un autre membre
+    // Nouvelle offre publiée — reçue par tous les autres membres
     socket.on("new_job", ({ job, notification }) => {
-      setJobs(j => {
-        if (j.find(x => x.id === job.id)) return j; // éviter doublon
-        return [job, ...j];
-      });
+      setJobs(j => j.find(x => x.id === job.id) ? j : [job, ...j]);
       if (notification) {
-        setNotifs(n => [{ ...notification, id: Date.now(), read: false, time: "À l'instant" }, ...n]);
+        setNotifs(n => [{ ...notification, id: Date.now(), read: false }, ...n]);
+        toast$(notification.msg);
       }
     });
 
@@ -463,6 +519,7 @@ export default function App() {
       setCurrentUser(user);
       await loadUsers(d.access_token);
       await loadJobs(d.access_token);
+      await loadMessages(user.name || user.email, d.access_token);
       setScreen("user"); setTab("home");
       toast$(`Bienvenue ${user.name} ! 🎉`);
       
@@ -607,16 +664,13 @@ export default function App() {
   const postJob = async () => {
     if (!jobForm.title || !jobForm.category) { toast$("Titre et catégorie requis", true); return; }
     const authorName  = currentUser?.name || currentUser?.email || "Moi";
-    const authorPhoto = currentUser?.photo_url || null;
     const newJob = {
       ...jobForm,
       posted_by: authorName,
-      posted_by_photo: authorPhoto,
       date: new Date().toISOString().slice(0,10),
       status: "open",
       applicants: 0,
     };
-    // Sauvegarder dans Supabase
     let savedJob = { ...newJob, id: Date.now(), postedBy: authorName };
     try {
       const saved = await sb.insert("jobs", newJob, authToken);
@@ -628,7 +682,7 @@ export default function App() {
     // Ajouter localement
     setJobs(j => [savedJob, ...j]);
 
-    // Notifier tous les membres via Socket.io
+    // Diffuser à tous via socket
     if (socketRef.current?.connected) {
       socketRef.current.emit("new_job", {
         job: savedJob,
@@ -636,6 +690,7 @@ export default function App() {
           type: "job",
           msg: `💼 Nouvelle offre : "${jobForm.title}" par ${authorName}`,
           from: authorName,
+          time: "À l'instant",
         }
       });
     }
@@ -835,7 +890,7 @@ export default function App() {
     { id:"home",        icon:"🏠", label:"Accueil" },
     { id:"jobs",        icon:"💼", label:"Offres" },
     { id:"techniciens", icon:"🔧", label:"Techs" },
-    { id:"chat",        icon:"💬", label:"Chat" },
+    { id:"chat",        icon:"💬", label:"Chat", badge: unreadChat },
     { id:"profile",     icon:"👤", label:"Profil" },
   ];
   return (
@@ -1374,22 +1429,32 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
   }, [socketRef?.current]);
 
   // ── Envoi message texte ────────────────────────────────────
-  const addMsg = (contactName, text) => {
+  const addMsg = async (contactName, text) => {
     const time  = new Date().toLocaleTimeString("fr", { hour:"2-digit", minute:"2-digit" });
     const msgId = Date.now();
-    const m     = { id:msgId, from:myName, text, time, isMe:true, status:"sent" };
+    const m     = { id:msgId, from:myName, to:contactName, text, time, isMe:true, status:"sent" };
 
-    // Ajouter localement côté expéditeur
+    // Ajouter localement côté expéditeur immédiatement
     setGlobalMsgs(prev => ({
       ...prev,
       [contactName]: [...(prev[contactName] || []), m],
     }));
 
-    // Envoyer via socket global
+    // Sauvegarder en Supabase pour persistance
+    try {
+      await sb.saveMessage({
+        from_user: myName,
+        to_user: contactName,
+        text,
+        read: false,
+      }, currentUser?.token);
+    } catch(e) { console.error("saveMessage error", e); }
+
+    // Envoyer via socket global pour temps réel
     if (socketRef?.current?.connected) {
       socketRef.current.emit("message", { to: contactName, text, msgId });
     } else {
-      console.warn("⚠️ Socket non connecté — message non envoyé");
+      console.warn("⚠️ Socket non connecté");
     }
   };
 
@@ -1402,16 +1467,20 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
       socketRef.current?.emit("typing", { to: activeC.name, typing: false }), 2000);
   };
 
-  // ── Marquer comme lu ───────────────────────────────────────
+  // ── Marquer comme lu à l'ouverture de la conversation ────
   useEffect(() => {
     if (!activeC) return;
-    // Marquer tous les messages de ce contact comme lus
+    // Marquer dans readContacts → badge disparaît
     setReadContacts?.(prev => new Set([...(prev || []), activeC.name]));
-    // Informer le serveur
+    // Informer socket
     if (socketRef?.current?.connected) {
       getMsgs(activeC.name).filter(m => !m.isMe && m.id).forEach(m =>
         socketRef.current.emit("msg_status", { msgId: m.id, status: "read", to: m.from })
       );
+    }
+    // Marquer lu en Supabase
+    if (currentUser?.token && activeC.name) {
+      sb.markRead(activeC.name, myName, currentUser.token).catch(() => {});
     }
   }, [activeC?.name]);
 
