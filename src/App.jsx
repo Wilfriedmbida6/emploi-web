@@ -851,7 +851,7 @@ export default function App() {
             setTab={setTab} reportedView />}
           {tab==="jobs"    && <AdminJobsTab jobs={jobs} setJobs={setJobs} toast$={toast$} setTab={setTab} />}
           {tab==="notifs"  && <NotifsTab notifs={adminNotifs} setNotifs={setAdminNotifs} unread={adminNotifs.filter(n=>!n.read).length} setTab={setTab} isAdmin />}
-          {tab==="messages"&& <ChatTab msgs={msgs} setMsgs={setMsgs} newMsg={newMsg} setNewMsg={setNewMsg} sendMsg={sendMsg} chatRef={chatRef} voiceOn={voiceOn} setVoiceOn={setVoiceOn} setTab={setTab} prevTab={prevTab} currentUser={currentUser} socketRef={socketRef} globalMsgs={globalMsgs} setGlobalMsgs={setGlobalMsgs} globalMsgStatus={globalMsgStatus} socketReady={socketReady} />}
+          {tab==="messages"&& <ChatTab msgs={msgs} setMsgs={setMsgs} newMsg={newMsg} setNewMsg={setNewMsg} sendMsg={sendMsg} chatRef={chatRef} voiceOn={voiceOn} setVoiceOn={setVoiceOn} setTab={setTab} prevTab={prevTab} currentUser={currentUser} socketRef={socketRef} globalMsgs={globalMsgs} setGlobalMsgs={setGlobalMsgs} globalMsgStatus={globalMsgStatus} socketReady={socketReady} readContacts={readContacts} setReadContacts={setReadContacts} />}
         </div>
         <TabBar tabs={adminTabs} />
       </div>
