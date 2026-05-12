@@ -103,13 +103,13 @@ io.on("connection", (socket) => {
   });
 
   // ── Statut message ─────────────────────────────────────────
+  
   socket.on("message", (msg) => {
-      setGlobalMsgs(prev => ({
-        ...prev,
-        [msg.from]: [...(prev[msg.from]||[]), {...msg, isMe:false}],
-      }));
-      setReadContacts(prev => { const s=new Set(prev); s.delete(msg.from); return s; });
-    });
+  setGlobalMsgs(prev => ({
+    ...prev,
+    [msg.from]: [...(prev[msg.from]||[]), {...msg, isMe:false}],
+  }));
+});
 
   socket.on("new_job", ({ job, notification }) => {
       setJobs(j => j.find(x=>x.id===job.id) ? j : [job,...j]);
