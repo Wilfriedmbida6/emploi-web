@@ -129,7 +129,7 @@ const sb = {
   async loadMessages(myName, token) {
     const e = encodeURIComponent(myName);
     const r = await fetch(
-      `${SUPABASE_URL}/rest/v1/messages?or=(from_user.eq.${e},to_user.eq.${e})&order=time.asc`,
+      `${SUPABASE_URL}/rest/v1/messages?or=(from_user.eq.${e},to_user.eq.${e})&order=created_at.asc`,
       { headers: sb.headers(token) }
     );
     return r.json();
@@ -375,7 +375,7 @@ export default function App() {
 
   const loadJobs = async (token) => {
   try {
-    const data = await sb.select("jobs", "*", token, "&order=date.desc");
+    const data = await sb.select("jobs", "*", token);
     if (Array.isArray(data)) setJobs(data.map(j=>({...j, postedBy:j.posted_by||j.postedBy})));
   } catch(e) { console.error("loadJobs error", e); }
 };
@@ -888,7 +888,7 @@ export default function App() {
         {tab==="home"        && <HomeTab users={users} jobs={jobs} setTab={setTab} toast$={toast$} openChat={openChat} handlePostuler={handlePostuler} setOnlineFilter={setOnlineFilter} openProfile={openProfile} />}
         {tab==="jobs"        && <JobsTab jobs={jobs} setJobs={setJobs} showJob={showJob} setShowJob={setShowJob} jobForm={jobForm} setJobForm={setJobForm} postJob={postJob} toast$={toast$} currentUser={currentUser} setTab={setTab} openChat={openChat} handlePostuler={handlePostuler} highlightJob={highlightJob} prevTab={prevTab} openProfile={openProfile} />}
         {tab==="techniciens" && <TechsTab users={filteredUsers(users.filter(u=>u.role==="technicien" && u.id !== currentUser?.id && u.email !== currentUser?.email && (!onlineFilter || u.online)))} searchQ={searchQ} setSearchQ={setSearchQ} selUser={selUser} setSelUser={setSelUser} setTab={setTab} toast$={toast$} myRatings={myRatings} setMyRatings={setMyRatings} openChat={openChat} onlineFilter={onlineFilter} setOnlineFilter={setOnlineFilter} viewProfileUser={viewProfileUser} setViewProfileUser={setViewProfileUser} />}
-        {tab==="chat"        && <ChatTab msgs={msgs} setMsgs={setMsgs} newMsg={newMsg} setNewMsg={setNewMsg} sendMsg={sendMsg} chatRef={chatRef} voiceOn={voiceOn} setVoiceOn={setVoiceOn} activeChatContact={activeChatContact} setActiveChatContact={setActiveChatContact} setTab={setTab} prevTab={prevTab} currentUser={currentUser} socketRef={socketRef} globalMsgs={globalMsgs} setGlobalMsgs={setGlobalMsgs} globalMsgStatus={globalMsgStatus} socketReady={socketReady} />}
+        {tab==="chat"        && <ChatTab msgs={msgs} setMsgs={setMsgs} newMsg={newMsg} setNewMsg={setNewMsg} sendMsg={sendMsg} chatRef={chatRef} voiceOn={voiceOn} setVoiceOn={setVoiceOn} activeChatContact={activeChatContact} setActiveChatContact={setActiveChatContact} setTab={setTab} prevTab={prevTab} currentUser={currentUser} socketRef={socketRef} globalMsgs={globalMsgs} setGlobalMsgs={setGlobalMsgs} globalMsgStatus={globalMsgStatus} socketReady={socketReady} readContacts={readContacts} setReadContacts={setReadContacts}/>}
         {tab==="profile"     && <ProfileTab currentUser={currentUser} doLogout={doLogout} toast$={toast$} openChat={openChat} setTab={setTab} />}
         {tab==="notifs"      && <NotifsTab notifs={notifs} setNotifs={setNotifs} unread={unread} setTab={setTab} openChat={openChat} setHighlightJob={setHighlightJob} />}
       </div>
