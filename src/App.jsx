@@ -123,13 +123,39 @@ const ADMIN_PASS  = "Admin@2025!";
 // ══════════════════════════════════════════════════════════════
 //  DONNÉES DE DÉMONSTRATION
 // ══════════════════════════════════════════════════════════════
-const mockUsers = [];
-const mockJobs = [];
+const mockUsers = [
+  { id:1, name:"Mamadou Diallo",  role:"technicien", avatar:"MD", city:"Dakar",   rating:4.8, exp:7,  skills:["Plomberie","Électricité"], status:"active", joined:"2025-01-10", jobs:34, online:true },
+  { id:2, name:"Fatou Ndiaye",    role:"technicien", avatar:"FN", city:"Abidjan", rating:4.5, exp:3,  skills:["Peinture","Carrelage"],    status:"active", joined:"2025-02-15", jobs:18, online:false },
+  { id:3, name:"Kofi Atta",       role:"technicien", avatar:"KA", city:"Accra",   rating:4.9, exp:12, skills:["Menuiserie","Soudure"],    status:"active", joined:"2024-11-01", jobs:87, online:true },
+  { id:4, name:"Aminata Touré",   role:"client",     avatar:"AT", city:"Conakry", rating:4.2, exp:0,  skills:[],                          status:"active", joined:"2025-03-05", jobs:0,  online:true },
+  { id:5, name:"Ibrahima Sow",    role:"technicien", avatar:"IS", city:"Bamako",  rating:3.9, exp:5,  skills:["Climatisation"],           status:"muted",  joined:"2025-01-22", jobs:21, online:false },
+  { id:6, name:"Aïcha Coulibaly", role:"client",     avatar:"AC", city:"Lomé",    rating:4.6, exp:0,  skills:[],                          status:"active", joined:"2025-04-01", jobs:0,  online:true },
+];
+const mockJobs = [
+  { id:1, title:"Réparation fuite d'eau urgente",   category:"Plomberie",    city:"Dakar",   budget:"15 000 FCFA",  urgent:true,  postedBy:"Aminata Touré",   date:"2025-04-29", status:"open",   applicants:3 },
+  { id:2, title:"Installation panneau solaire 5kW", category:"Électricité",  city:"Abidjan", budget:"450 000 FCFA", urgent:false, postedBy:"Aïcha Coulibaly", date:"2025-04-28", status:"open",   applicants:7 },
+  { id:3, title:"Peinture appartement F4",          category:"Peinture",     city:"Accra",   budget:"80 000 FCFA",  urgent:false, postedBy:"Aminata Touré",   date:"2025-04-27", status:"closed", applicants:12 },
+  { id:4, title:"Climatisation bureau 3 pièces",    category:"Climatisation",city:"Bamako",  budget:"120 000 FCFA", urgent:true,  postedBy:"Aïcha Coulibaly", date:"2025-04-29", status:"open",   applicants:2 },
+  { id:5, title:"Carrelage cuisine + bain",         category:"Carrelage",    city:"Lomé",    budget:"95 000 FCFA",  urgent:false, postedBy:"Aminata Touré",   date:"2025-04-26", status:"open",   applicants:5 },
+];
 // Notifs admin (new_user, report = admin seulement)
-const mockAdminNotifs = [];
+const mockAdminNotifs = [
+  { id:1, type:"new_user",    msg:"Nouveau membre : Aïcha Coulibaly",      time:"Il y a 2h", read:false },
+  { id:2, type:"new_job",     msg:"Nouvelle offre : Installation solaire", time:"Il y a 3h", read:false },
+  { id:3, type:"report",      msg:"Signalement sur Ibrahima Sow",          time:"Il y a 5h", read:false },
+  { id:4, type:"new_user",    msg:"Nouveau membre : Kofi Atta",            time:"Il y a 1j", read:true  },
+];
 // Notifs utilisateur (messages, offres, candidatures — PAS new_user ni report)
-const mockNotifs = [];
-const mockMessages = [];
+const mockNotifs = [
+  { id:2, type:"new_job",     msg:"Nouvelle offre : Installation solaire", time:"Il y a 3h", read:false },
+  { id:5, type:"message",     msg:"Nouveau message de Mamadou Diallo",     time:"Il y a 1j", read:true, from:"Mamadou Diallo" },
+  { id:6, type:"application", msg:"Candidature reçue pour votre offre",   time:"Il y a 2j", read:true  },
+];
+const mockMessages = [
+  { id:1, from:"Mamadou Diallo", text:"Bonjour ! J'ai un problème avec mon profil.", time:"10:30", isMe:false },
+  { id:2, from:"Moi",            text:"Bonjour, quel est le problème exactement ?",  time:"10:32", isMe:true  },
+  { id:3, from:"Mamadou Diallo", text:"Je n'arrive pas à uploader mon CV.",           time:"10:33", isMe:false },
+];
 const CATEGORIES = [
   "Plomberie","Électricité","Peinture","Menuiserie","Carrelage",
   "Climatisation","Soudure","Jardinage","Nettoyage","Sécurité",
@@ -226,6 +252,7 @@ export default function App() {
   const [globalMsgs, setGlobalMsgs]           = useState({});
   const [globalMsgStatus, setGlobalMsgStatus] = useState({});
   const [socketReady, setSocketReady]         = useState(false);
+  const [readContacts, setReadContacts]       = useState(new Set()); // contacts dont les msgs sont lus
 
   // Form fields
   const [email, setEmail]   = useState("");
@@ -241,6 +268,12 @@ export default function App() {
 
   const unread      = notifs.filter(n => !n.read).length;
   const adminUnread = screen==="admin" ? (adminNotifs||[]).filter(n=>!n.read).length : 0;
+
+  // Compter messages non lus — exclure les conversations déjà ouvertes
+  const unreadChat = Object.entries(globalMsgs || {}).reduce((acc, [contact, msgs]) => {
+    if (readContacts.has(contact)) return acc;
+    return acc + msgs.filter(m => !m.isMe).length;
+  }, 0);
 
   const toast$ = (msg, err=false) => {
     setToast({ msg, err });
@@ -351,28 +384,22 @@ export default function App() {
     socket.on("message", (msg) => {
       setGlobalMsgs(prev => ({
         ...prev,
-        [msg.from]: [...(prev[msg.from] || []), { ...msg, isMe: false, read: false }],
+        [msg.from]: [...(prev[msg.from] || []), { ...msg, isMe: false }],
       }));
-      // Notification cloche
-      setNotifs(n => [{ id:Date.now(), type:"message",
-        msg:`💬 Nouveau message de ${msg.from}`, from:msg.from,
-        time:"À l'instant", read:false }, ...n]);
-    });
-    // ✅ Recevoir nouvelles offres en temps réel
-    socket.on("new_job", (job) => {
-      setJobs(prev => prev.find(j => j.id === job.id) ? prev : [{ ...job, postedBy: job.posted_by || job.postedBy }, ...prev]);
-      setNotifs(n => [{ id:Date.now(), type:"new_job",
-        msg:`💼 Nouvelle offre : ${job.title}`, time:"À l'instant", read:false }, ...n]);
-    });
-    // ✅ Recevoir confirmation "lu" de l'autre côté
-    socket.on("msg_read", ({ from }) => {
-      setGlobalMsgs(prev => {
-        const conv = (prev[from] || []).map(m => m.isMe ? { ...m, status:"read" } : m);
-        return { ...prev, [from]: conv };
-      });
     });
     socket.on("msg_status", ({ msgId, status }) => {
       setGlobalMsgStatus(s => ({ ...s, [msgId]: status }));
+    });
+
+    // Nouvelle offre publiée par un autre membre
+    socket.on("new_job", ({ job, notification }) => {
+      setJobs(j => {
+        if (j.find(x => x.id === job.id)) return j; // éviter doublon
+        return [job, ...j];
+      });
+      if (notification) {
+        setNotifs(n => [{ ...notification, id: Date.now(), read: false, time: "À l'instant" }, ...n]);
+      }
     });
 
     // Recharger les données toutes les 30s
@@ -590,19 +617,29 @@ export default function App() {
       applicants: 0,
     };
     // Sauvegarder dans Supabase
-    let finalJob;
+    let savedJob = { ...newJob, id: Date.now(), postedBy: authorName };
     try {
       const saved = await sb.insert("jobs", newJob, authToken);
-      finalJob = Array.isArray(saved) ? { ...saved[0], postedBy: saved[0]?.posted_by || authorName }
-                                      : { id:Date.now(), ...newJob, postedBy: authorName };
-    } catch(e) {
-      finalJob = { id:Date.now(), ...newJob, postedBy: authorName };
-    }
-    setJobs(j => [finalJob, ...j]);
-    // ✅ Broadcaster l'offre à tous les connectés
+      if (Array.isArray(saved) && saved[0]) {
+        savedJob = { ...saved[0], postedBy: saved[0].posted_by || authorName };
+      }
+    } catch(e) { console.error("postJob error", e); }
+
+    // Ajouter localement
+    setJobs(j => [savedJob, ...j]);
+
+    // Notifier tous les membres via Socket.io
     if (socketRef.current?.connected) {
-      socketRef.current.emit("new_job", finalJob);
+      socketRef.current.emit("new_job", {
+        job: savedJob,
+        notification: {
+          type: "job",
+          msg: `💼 Nouvelle offre : "${jobForm.title}" par ${authorName}`,
+          from: authorName,
+        }
+      });
     }
+
     setJobForm({ title:"",category:"",city:"",budget:"",urgent:false });
     setShowJob(false); toast$("Offre publiée ! ✅");
   };
@@ -794,15 +831,11 @@ export default function App() {
   // ══════════════════════════════════════════════════════════════
   //  UTILISATEUR
   // ══════════════════════════════════════════════════════════════
-  // Badge chat = messages reçus non lus
-  const chatBadge = Object.values(globalMsgs || {})
-    .reduce((acc, msgs) => acc + msgs.filter(m => !m.isMe && !m.read).length, 0);
-
   const userTabs = [
     { id:"home",        icon:"🏠", label:"Accueil" },
     { id:"jobs",        icon:"💼", label:"Offres" },
     { id:"techniciens", icon:"🔧", label:"Techs" },
-    { id:"chat",        icon:"💬", label:"Chat",  badge: chatBadge },
+    { id:"chat",        icon:"💬", label:"Chat" },
     { id:"profile",     icon:"👤", label:"Profil" },
   ];
   return (
@@ -825,7 +858,7 @@ export default function App() {
         {tab==="home"        && <HomeTab users={users} jobs={jobs} setTab={setTab} toast$={toast$} openChat={openChat} handlePostuler={handlePostuler} setOnlineFilter={setOnlineFilter} openProfile={openProfile} />}
         {tab==="jobs"        && <JobsTab jobs={jobs} setJobs={setJobs} showJob={showJob} setShowJob={setShowJob} jobForm={jobForm} setJobForm={setJobForm} postJob={postJob} toast$={toast$} currentUser={currentUser} setTab={setTab} openChat={openChat} handlePostuler={handlePostuler} highlightJob={highlightJob} prevTab={prevTab} openProfile={openProfile} />}
         {tab==="techniciens" && <TechsTab users={filteredUsers(users.filter(u=>u.role==="technicien" && u.id !== currentUser?.id && u.email !== currentUser?.email && (!onlineFilter || u.online)))} searchQ={searchQ} setSearchQ={setSearchQ} selUser={selUser} setSelUser={setSelUser} setTab={setTab} toast$={toast$} myRatings={myRatings} setMyRatings={setMyRatings} openChat={openChat} onlineFilter={onlineFilter} setOnlineFilter={setOnlineFilter} viewProfileUser={viewProfileUser} setViewProfileUser={setViewProfileUser} />}
-        {tab==="chat"        && <ChatTab msgs={msgs} setMsgs={setMsgs} newMsg={newMsg} setNewMsg={setNewMsg} sendMsg={sendMsg} chatRef={chatRef} voiceOn={voiceOn} setVoiceOn={setVoiceOn} activeChatContact={activeChatContact} setActiveChatContact={setActiveChatContact} setTab={setTab} prevTab={prevTab} currentUser={currentUser} socketRef={socketRef} globalMsgs={globalMsgs} setGlobalMsgs={setGlobalMsgs} globalMsgStatus={globalMsgStatus} socketReady={socketReady} />}
+        {tab==="chat"        && <ChatTab msgs={msgs} setMsgs={setMsgs} newMsg={newMsg} setNewMsg={setNewMsg} sendMsg={sendMsg} chatRef={chatRef} voiceOn={voiceOn} setVoiceOn={setVoiceOn} activeChatContact={activeChatContact} setActiveChatContact={setActiveChatContact} setTab={setTab} prevTab={prevTab} currentUser={currentUser} socketRef={socketRef} globalMsgs={globalMsgs} setGlobalMsgs={setGlobalMsgs} globalMsgStatus={globalMsgStatus} socketReady={socketReady} readContacts={readContacts} setReadContacts={setReadContacts} />}
         {tab==="profile"     && <ProfileTab currentUser={currentUser} doLogout={doLogout} toast$={toast$} openChat={openChat} setTab={setTab} />}
         {tab==="notifs"      && <NotifsTab notifs={notifs} setNotifs={setNotifs} unread={unread} setTab={setTab} openChat={openChat} setHighlightJob={setHighlightJob} />}
       </div>
@@ -1296,10 +1329,12 @@ function NotifsTab({ notifs, setNotifs, unread, setTab, openChat, setHighlightJo
 }
 
 const DEFAULT_CONTACTS = [
-  { name:"Support EPT", online:true, initials:"SE", color:"#C62828" },
+  { name:"Support EPT",    online:true,  initials:"SE", color:"#C62828" },
+  { name:"Mamadou Diallo", online:true,  initials:"MD", color:"#1565C0" },
+  { name:"Kofi Atta",      online:false, initials:"KA", color:"#6A1B9A" },
 ];
 
-function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, setVoiceOn, activeChatContact, setActiveChatContact, setTab, prevTab, currentUser, socketRef, globalMsgs, setGlobalMsgs, globalMsgStatus, socketReady }) {
+function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, setVoiceOn, activeChatContact, setActiveChatContact, setTab, prevTab, currentUser, socketRef, globalMsgs, setGlobalMsgs, globalMsgStatus, socketReady, readContacts, setReadContacts }) {
   const [activeC, setActiveC]               = useState(null);
   const [typingContacts, setTypingContacts] = useState({});
   const [selectedMsg, setSelectedMsg]       = useState(null);
@@ -1367,19 +1402,16 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
       socketRef.current?.emit("typing", { to: activeC.name, typing: false }), 2000);
   };
 
-  // ── Marquer comme lu quand on ouvre la conv ──────────────
+  // ── Marquer comme lu ───────────────────────────────────────
   useEffect(() => {
     if (!activeC) return;
-    // Marquer tous les messages reçus de cette conv comme lus localement
-    setGlobalMsgs(prev => {
-      const conv = (prev[activeC.name] || []).map(m =>
-        (!m.isMe && !m.read) ? { ...m, read: true } : m
-      );
-      return { ...prev, [activeC.name]: conv };
-    });
-    // Informer l'expéditeur que ses messages ont été lus
+    // Marquer tous les messages de ce contact comme lus
+    setReadContacts?.(prev => new Set([...(prev || []), activeC.name]));
+    // Informer le serveur
     if (socketRef?.current?.connected) {
-      socketRef.current.emit("msg_read", { to: activeC.name });
+      getMsgs(activeC.name).filter(m => !m.isMe && m.id).forEach(m =>
+        socketRef.current.emit("msg_status", { msgId: m.id, status: "read", to: m.from })
+      );
     }
   }, [activeC?.name]);
 
@@ -1482,7 +1514,7 @@ function ChatTab({ msgs, setMsgs, newMsg, setNewMsg, sendMsg, chatRef, voiceOn, 
       {allContacts.map(name => {
         const convMsgs = getMsgs(name);
         const last     = convMsgs[convMsgs.length - 1];
-        const unread   = convMsgs.filter(m => !m.isMe && !m.read).length;
+        const unread   = convMsgs.filter(m => !m.isMe).length;
         return (
           <div key={name} style={{ background:"#122236", borderRadius:14, padding:14, marginBottom:10, display:"flex", alignItems:"center", gap:12, border:"1px solid #1e3a52", cursor:"pointer" }}
             onClick={()=>setActiveC({ name, initials: name.split(" ").map(w=>w[0]).join("").slice(0,2).toUpperCase(), online:true })}>
